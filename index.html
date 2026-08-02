@@ -12,6 +12,36 @@
     html, body { margin: 0; padding: 0; background: #030f18; overscroll-behavior: none; }
     #root { min-height: 100vh; }
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    button { transition: transform 0.1s ease-out; }
+    button:active { transform: scale(0.96); }
+    input[type="text"], input[type="range"] { -webkit-user-select: text; }
+
+    @keyframes floatUp {
+      0% { transform: translateY(0); opacity: 0; }
+      10% { opacity: var(--op); }
+      90% { opacity: var(--op); }
+      100% { transform: translateY(-100vh); opacity: 0; }
+    }
+    @keyframes sway {
+      0%, 100% { margin-left: calc(var(--sway) * -1px); }
+      50% { margin-left: var(--sway); }
+    }
+    @keyframes burstOut {
+      0% { transform: translate(-50%,-50%) translate(0,0); opacity: 1; }
+      100% { transform: translate(-50%,-50%) translate(var(--dx), calc(var(--dy) - 40px)); opacity: 0; }
+    }
+    @keyframes ringExpand {
+      0% { width: 20px; height: 20px; opacity: 0.9; }
+      100% { width: 340px; height: 340px; opacity: 0; }
+    }
+    @keyframes fadeIn {
+      0% { opacity: 0; transform: translateY(6px); }
+      100% { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes pulseFade {
+      0%, 100% { opacity: 0.4; transform: scale(0.92); }
+      50% { opacity: 1; transform: scale(1); }
+    }
   </style>
 </head>
 <body>
