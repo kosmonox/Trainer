@@ -8,6 +8,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      CI: true
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -30,20 +32,30 @@ jobs:
         run: npx vite build
 
       - name: Add Android platform
-        run: npx cap add android
+        run: yes | npx cap add android --verbose || (echo "=== retry without yes ===" && npx cap add android --verbose)
 
       - name: Sync Capacitor
-        run: npx cap sync android
+        run: npx cap sync android --verbose
 
       - name: Make gradlew executable
         run: chmod +x android/gradlew
 
       - name: Build debug APK
         working-directory: android
-        run: ./gradlew assembleDebug
+        run: ./gradlew assembleDebug --stacktrace
 
       - name: Upload APK
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: ApneaTrainer-apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Upload full log on any failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: |
+            android/**/build/reports/**
+            ~/.npm/_logs/**
