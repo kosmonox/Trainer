@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import {
   Heart, Play, Trash2, X, Zap, AlertTriangle, Plus, Minus,
   Bluetooth, Dumbbell, Timer, BarChart3, Settings2, Star,
-  Clock, Layers, TrendingUp, RotateCcw,
+  Clock, Layers, TrendingUp, RotateCcw, Check,
 } from "lucide-react";
 import { loadStored, saveStored } from "./storage.js";
 import { scanAndConnectHrMonitor, disconnectHrMonitor } from "./ble.js";
@@ -10,8 +10,8 @@ import { warningPulse, transitionPulse, minutePulse, prBeatPulse, setHapticsEnab
 
 const COLORS = {
   bg: "#030f18",
-  bgCard: "#0a1f2e",
-  bgCardHi: "#0e2a3d",
+  bgCard: "rgba(10,31,46,0.55)",
+  bgCardHi: "rgba(14,42,61,0.6)",
   cyan: "#7fd8ff",
   cyanBright: "#a8e8ff",
   green: "#7fe8a8",
@@ -19,19 +19,12 @@ const COLORS = {
   red: "#ff7676",
   orange: "#f4b13f",
   white: "#eaf9ff",
-  dim: "#4a7488",
+  dim: "#6a93a8",
 };
 
 const DISPLAY_FONT = "'Oswald', system-ui, sans-serif";
 const BODY_FONT = "'Inter', system-ui, sans-serif";
-
-const PRESETS = [
-  { id: "preset-co2-gentle", name: "CO2 gentle", tableType: "CO2", baseHold: 90, baseBreathe: 120, step: 10, rounds: 6 },
-  { id: "preset-co2-classic", name: "CO2 classic", tableType: "CO2", baseHold: 120, baseBreathe: 120, step: 15, rounds: 8 },
-  { id: "preset-co2-advanced", name: "CO2 advanced", tableType: "CO2", baseHold: 150, baseBreathe: 90, step: 15, rounds: 8 },
-  { id: "preset-o2-classic", name: "O2 classic", tableType: "O2", baseHold: 60, baseBreathe: 120, step: 20, rounds: 8 },
-  { id: "preset-o2-advanced", name: "O2 advanced", tableType: "O2", baseHold: 90, baseBreathe: 150, step: 20, rounds: 8 },
-];
+const glass = { backdropFilter: "blur(10px)", WebkitBackdropFilter: "blur(10px)" };
 
 const DIFFICULTIES = {
   easy: { label: "Easy", emoji: "\u{1F343}", breatheMul: 1.35, holdMul: 0.70, color: COLORS.green },
@@ -47,6 +40,17 @@ function formatTime(totalSeconds) {
 }
 function todayKey() { return new Date().toISOString().slice(0, 10); }
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+
+function autoTable(type, prSeconds) {
+  if (type === "O2") {
+    const hold = prSeconds > 0 ? Math.max(15, Math.round(prSeconds * 0.5)) : 60;
+    const step = prSeconds > 0 ? Math.max(5, Math.round(prSeconds * 0.08)) : 15;
+    return { id: "auto-o2", name: "O2 Table", tableType: "O2", baseHold: hold, baseBreathe: 120, step, rounds: 8 };
+  }
+  const hold = prSeconds > 0 ? Math.max(15, Math.round(prSeconds * 0.5)) : 90;
+  const step = prSeconds > 0 ? Math.max(5, Math.round(prSeconds * 0.06)) : 15;
+  return { id: "auto-co2", name: "CO2 Table", tableType: "CO2", baseHold: hold, baseBreathe: 150, step, rounds: 8 };
+}
 
 function computeRoundPreview(table) {
   let breathe = table.baseBreathe, hold = table.baseHold;
@@ -66,9 +70,6 @@ function tableStats(table) {
 }
 
 // ---------------------------------------------------------------------------
-// Visual components
-// ---------------------------------------------------------------------------
-
 function Bubbles({ count = 16 }) {
   const bubbles = useRef(
     Array.from({ length: count }).map(() => ({
@@ -93,14 +94,18 @@ function Bubbles({ count = 16 }) {
   );
 }
 
+function PhaseTint({ active, mode }) {
+  const color = mode === "breathe" ? "rgba(127,232,168,0.10)" : mode === "hold" ? "rgba(127,216,255,0.10)" : "transparent";
+  return <div style={{ position: "fixed", inset: 0, zIndex: 0, background: active ? color : "transparent", transition: "background 0.6s ease" }} />;
+}
+
 function BubbleBurst({ burstTrigger }) {
   const [particles, setParticles] = useState([]);
   useEffect(() => {
     if (!burstTrigger) return;
     const n = 24;
     const arr = Array.from({ length: n }).map(() => {
-      const angle = Math.random() * 360;
-      const dist = 60 + Math.random() * 90;
+      const angle = Math.random() * 360, dist = 60 + Math.random() * 90;
       return { id: uid(), angle, dist, size: 3 + Math.random() * 7, delay: Math.random() * 0.15 };
     });
     setParticles(arr);
@@ -113,13 +118,11 @@ function BubbleBurst({ burstTrigger }) {
       {particles.map((p) => {
         const rad = (p.angle * Math.PI) / 180;
         const dx = Math.cos(rad) * p.dist, dy = Math.sin(rad) * p.dist;
-        return (
-          <div key={p.id} style={{
-            position: "absolute", top: "50%", left: "50%", width: p.size, height: p.size, borderRadius: "50%",
-            background: COLORS.cyanBright, boxShadow: "0 0 6px rgba(168,232,255,0.9)",
-            animation: `burstOut 1s ease-out ${p.delay}s forwards`, "--dx": `${dx}px`, "--dy": `${dy}px`,
-          }} />
-        );
+        return <div key={p.id} style={{
+          position: "absolute", top: "50%", left: "50%", width: p.size, height: p.size, borderRadius: "50%",
+          background: COLORS.cyanBright, boxShadow: "0 0 6px rgba(168,232,255,0.9)",
+          animation: `burstOut 1s ease-out ${p.delay}s forwards`, "--dx": `${dx}px`, "--dy": `${dy}px`,
+        }} />;
       })}
     </div>
   );
@@ -143,7 +146,7 @@ function RippleRings({ trigger, color }) {
   );
 }
 
-function ProgressRing({ fraction, color, size = 232, stroke = 10 }) {
+function ProgressRing({ fraction, color, size = 260, stroke = 11 }) {
   const r = (size - stroke) / 2;
   const c = 2 * Math.PI * r;
   const offset = c * (1 - Math.max(0, Math.min(1, fraction)));
@@ -158,21 +161,22 @@ function ProgressRing({ fraction, color, size = 232, stroke = 10 }) {
 
 function HrGauge({ hr, min, max, bleStatus, bleConnected, onConnect, onDisconnect, manualHr, setManualHr }) {
   const pct = (v) => Math.max(0, Math.min(100, (v / 200) * 100));
+  const stop = (e) => e.stopPropagation();
   return (
-    <div style={{ width: "100%" }}>
+    <div style={{ width: "100%" }} onClick={stop} onTouchStart={stop} onMouseDown={stop}>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <Heart size={18} color={COLORS.red} fill={COLORS.red} />
-        <div style={{ position: "relative", flex: 1, height: 10, borderRadius: 6,
+        <Heart size={20} color={COLORS.red} fill={COLORS.red} />
+        <div style={{ position: "relative", flex: 1, height: 11, borderRadius: 6,
           background: "linear-gradient(to right, #4fc3f7 0%, #7fe8a8 18%, #f4d03f 55%, #ff7676 100%)" }}>
-          {min > 0 && <div style={{ position: "absolute", left: `${pct(min)}%`, top: -9, transform: "translateX(-50%)", color: COLORS.cyan, fontSize: 12 }}>&#9650;</div>}
-          {max > 0 && <div style={{ position: "absolute", left: `${pct(max)}%`, bottom: -9, transform: "translateX(-50%)", color: COLORS.red, fontSize: 12 }}>&#9660;</div>}
-          {hr > 0 && <div style={{ position: "absolute", left: `${pct(hr)}%`, top: "50%", transform: "translate(-50%,-50%)", width: 16, height: 16, borderRadius: "50%", background: COLORS.white, border: `2px solid ${COLORS.bg}` }} />}
+          {min > 0 && <div style={{ position: "absolute", left: `${pct(min)}%`, top: -9, transform: "translateX(-50%)", color: COLORS.cyan, fontSize: 13 }}>&#9650;</div>}
+          {max > 0 && <div style={{ position: "absolute", left: `${pct(max)}%`, bottom: -9, transform: "translateX(-50%)", color: COLORS.red, fontSize: 13 }}>&#9660;</div>}
+          {hr > 0 && <div style={{ position: "absolute", left: `${pct(hr)}%`, top: "50%", transform: "translate(-50%,-50%)", width: 18, height: 18, borderRadius: "50%", background: COLORS.white, border: `2px solid ${COLORS.bg}` }} />}
         </div>
       </div>
-      <div style={{ textAlign: "center", marginTop: 6, color: COLORS.red, fontWeight: 700, fontSize: 15, fontFamily: DISPLAY_FONT, letterSpacing: 1 }}>
+      <div style={{ textAlign: "center", marginTop: 7, color: COLORS.red, fontWeight: 700, fontSize: 17, fontFamily: DISPLAY_FONT, letterSpacing: 1 }}>
         {hr > 0 ? `${hr} BPM` : "-- BPM"}
       </div>
-      <div style={{ display: "flex", justifyContent: "center", marginTop: 10 }}>
+      <div style={{ display: "flex", justifyContent: "center", marginTop: 12 }}>
         {bleConnected ? (
           <button onClick={onDisconnect} style={{ ...pillBtnStyle, borderColor: "rgba(255,118,118,0.4)", color: COLORS.red, display: "flex", alignItems: "center", gap: 6 }}><Bluetooth size={14} /> Disconnect watch</button>
         ) : (
@@ -181,7 +185,7 @@ function HrGauge({ hr, min, max, bleStatus, bleConnected, onConnect, onDisconnec
       </div>
       {bleStatus && <div style={{ textAlign: "center", fontSize: 12, color: COLORS.dim, marginTop: 6 }}>{bleStatus}</div>}
       {!bleConnected && (
-        <div style={{ marginTop: 10 }}>
+        <div style={{ marginTop: 12 }}>
           <div style={{ fontSize: 11, color: COLORS.dim, textAlign: "center", marginBottom: 4, letterSpacing: 1 }}>OR DRAG TO LOG MANUALLY</div>
           <input type="range" min={0} max={200} value={manualHr} onChange={(e) => setManualHr(Number(e.target.value))} style={{ width: "100%", accentColor: COLORS.cyan }} />
         </div>
@@ -191,8 +195,8 @@ function HrGauge({ hr, min, max, bleStatus, bleConnected, onConnect, onDisconnec
 }
 
 function ScreenHeader({ title }) {
-  return <div style={{ textAlign: "center", padding: "44px 20px 18px" }}>
-    <div style={{ fontSize: 22, fontWeight: 700, color: COLORS.white, letterSpacing: 2, fontFamily: DISPLAY_FONT, textTransform: "uppercase" }}>{title}</div>
+  return <div style={{ textAlign: "center", padding: "46px 20px 20px" }}>
+    <div style={{ fontSize: 24, fontWeight: 700, color: COLORS.white, letterSpacing: 2, fontFamily: DISPLAY_FONT, textTransform: "uppercase" }}>{title}</div>
   </div>;
 }
 
@@ -202,22 +206,22 @@ function TableCard({ table, onPlay, onDelete }) {
   const isO2 = table.tableType === "O2";
   const badgeColor = isO2 ? COLORS.cyan : COLORS.green;
   return (
-    <div style={{ background: COLORS.bgCard, borderRadius: 20, padding: "20px 20px 18px", marginBottom: 14, border: "1px solid rgba(127,216,255,0.12)" }}>
+    <div style={{ ...glass, background: COLORS.bgCard, borderRadius: 22, padding: "22px 22px 20px", marginBottom: 16, border: "1px solid rgba(127,216,255,0.15)" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <span style={{ display: "inline-block", padding: "4px 10px", borderRadius: 8, fontSize: 11, fontWeight: 700, letterSpacing: 1, color: badgeColor, background: `${badgeColor}22`, fontFamily: DISPLAY_FONT }}>
+        <span style={{ display: "inline-block", padding: "5px 11px", borderRadius: 8, fontSize: 12, fontWeight: 700, letterSpacing: 1, color: badgeColor, background: `${badgeColor}22`, fontFamily: DISPLAY_FONT }}>
           {table.tableType} TABLE
         </span>
-        {onDelete && <span onClick={onDelete} style={{ color: COLORS.red, cursor: "pointer", padding: 4 }}><Trash2 size={16} /></span>}
+        {onDelete && <span onClick={onDelete} style={{ color: COLORS.red, cursor: "pointer", padding: 4 }}><Trash2 size={17} /></span>}
       </div>
-      <div style={{ color: COLORS.white, fontWeight: 700, fontSize: 20, fontFamily: DISPLAY_FONT, marginTop: 8, marginBottom: 6 }}>{table.name}</div>
-      <div style={{ display: "flex", gap: 16, color: COLORS.dim, fontSize: 12.5, marginBottom: 16, flexWrap: "wrap" }}>
-        <span style={{ display: "flex", alignItems: "center", gap: 4 }}><Layers size={13} /> {table.rounds} rounds</span>
-        <span style={{ display: "flex", alignItems: "center", gap: 4 }}><Clock size={13} /> {formatTime(totalSeconds)}</span>
-        <span style={{ display: "flex", alignItems: "center", gap: 4, color: badgeColor }}><TrendingUp size={13} /> max {formatTime(maxHold)}</span>
+      <div style={{ color: COLORS.white, fontWeight: 700, fontSize: 22, fontFamily: DISPLAY_FONT, marginTop: 10, marginBottom: 8 }}>{table.name}</div>
+      <div style={{ display: "flex", gap: 18, color: COLORS.dim, fontSize: 13.5, marginBottom: 18, flexWrap: "wrap" }}>
+        <span style={{ display: "flex", alignItems: "center", gap: 5 }}><Layers size={14} /> {table.rounds} rounds</span>
+        <span style={{ display: "flex", alignItems: "center", gap: 5 }}><Clock size={14} /> {formatTime(totalSeconds)}</span>
+        <span style={{ display: "flex", alignItems: "center", gap: 5, color: badgeColor }}><TrendingUp size={14} /> max {formatTime(maxHold)}</span>
       </div>
-      <div style={{ display: "flex", alignItems: "flex-end", gap: 4, height: 32, marginBottom: 16 }}>
+      <div style={{ display: "flex", alignItems: "flex-end", gap: 4, height: 34, marginBottom: 18 }}>
         {rounds.map((r, i) => {
-          const h = 8 + (r.hold / maxVal) * 24;
+          const h = 8 + (r.hold / maxVal) * 26;
           const t = i / Math.max(1, rounds.length - 1);
           const color = isO2
             ? `rgba(${79 + (127 - 79) * t}, ${195 + (216 - 195) * t}, ${247 + (255 - 247) * t}, ${0.5 + t * 0.5})`
@@ -226,9 +230,9 @@ function TableCard({ table, onPlay, onDelete }) {
         })}
       </div>
       <button onClick={onPlay} style={{
-        width: 44, height: 44, borderRadius: "50%", border: `1px solid ${badgeColor}66`, background: `${badgeColor}18`,
+        width: 48, height: 48, borderRadius: "50%", border: `1px solid ${badgeColor}66`, background: `${badgeColor}18`,
         color: badgeColor, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
-      }}><Play size={18} fill={badgeColor} /></button>
+      }}><Play size={19} fill={badgeColor} /></button>
     </div>
   );
 }
@@ -249,12 +253,12 @@ function Stepper({ label, value, onDec, onInc }) {
 function ConfirmModal({ title, body, confirmLabel, danger, onConfirm, onCancel }) {
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(3,15,24,0.85)", zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
-      <div style={{ background: COLORS.bgCard, borderRadius: 18, padding: 24, width: "100%", maxWidth: 340, border: "1px solid rgba(127,216,255,0.2)" }}>
+      <div style={{ ...glass, background: "rgba(10,31,46,0.9)", borderRadius: 18, padding: 24, width: "100%", maxWidth: 340, border: "1px solid rgba(127,216,255,0.2)" }}>
         <div style={{ color: COLORS.white, fontWeight: 700, fontSize: 18, fontFamily: DISPLAY_FONT, marginBottom: 10 }}>{title}</div>
         <div style={{ color: COLORS.dim, fontSize: 14, marginBottom: 20, lineHeight: 1.4 }}>{body}</div>
         <div style={{ display: "flex", gap: 10 }}>
           <button onClick={onCancel} style={{ ...pillBtnStyle, flex: 1, textAlign: "center" }}>Cancel</button>
-          <button onClick={onConfirm} style={{ ...pillBtnStyle, flex: 1, textAlign: "center", borderColor: danger ? "rgba(255,118,118,0.5)" : "rgba(127,216,255,0.5)", color: danger ? COLORS.red : COLORS.cyan, background: danger ? "rgba(255,118,118,0.12)" : "rgba(127,216,255,0.12)" }}>{confirmLabel}</button>
+          <button onClick={onConfirm} style={{ ...pillBtnStyle, flex: 1, textAlign: "center", borderColor: danger ? "rgba(255,118,118,0.5)" : "rgba(127,216,255,0.5)", color: danger ? COLORS.red : COLORS.cyan, background: danger ? "rgba(255,118,118,0.15)" : "rgba(127,216,255,0.15)" }}>{confirmLabel}</button>
         </div>
       </div>
     </div>
@@ -264,7 +268,7 @@ function ConfirmModal({ title, body, confirmLabel, danger, onConfirm, onCancel }
 function DifficultyPicker({ onPick, onCancel }) {
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(3,15,24,0.85)", zIndex: 50, display: "flex", alignItems: "flex-end" }}>
-      <div style={{ background: COLORS.bgCard, borderRadius: "20px 20px 0 0", padding: 22, width: "100%", border: "1px solid rgba(127,216,255,0.2)" }}>
+      <div style={{ ...glass, background: "rgba(10,31,46,0.9)", borderRadius: "20px 20px 0 0", padding: 22, width: "100%", border: "1px solid rgba(127,216,255,0.2)" }}>
         <div style={{ color: COLORS.white, fontWeight: 700, fontSize: 18, fontFamily: DISPLAY_FONT, marginBottom: 14, textAlign: "center" }}>Choose intensity</div>
         {Object.entries(DIFFICULTIES).map(([key, d]) => (
           <button key={key} onClick={() => onPick(key)} style={{
@@ -283,57 +287,117 @@ function DifficultyPicker({ onPick, onCancel }) {
   );
 }
 
+function Toast({ message }) {
+  if (!message) return null;
+  return (
+    <div style={{
+      position: "fixed", top: "calc(env(safe-area-inset-top) + 16px)", left: "50%", transform: "translateX(-50%)",
+      zIndex: 60, ...glass, background: "rgba(127,216,255,0.18)", border: "1px solid rgba(127,216,255,0.4)",
+      borderRadius: 14, padding: "10px 18px", display: "flex", alignItems: "center", gap: 8,
+      color: COLORS.cyanBright, fontSize: 14, fontWeight: 600, animation: "toastIn 0.25s ease-out",
+    }}>
+      <Check size={16} /> {message}
+    </div>
+  );
+}
+
+function CalendarGrid({ history, selectedDate, onSelectDate }) {
+  const now = new Date();
+  const year = now.getFullYear(), month = now.getMonth();
+  const firstDay = new Date(year, month, 1);
+  const startWeekday = firstDay.getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const byDate = {};
+  history.forEach((e) => { (byDate[e.date] = byDate[e.date] || []).push(e); });
+  const monthName = now.toLocaleString("default", { month: "long" });
+  const cells = [];
+  for (let i = 0; i < startWeekday; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+
+  return (
+    <div style={{ ...glass, background: COLORS.bgCard, borderRadius: 20, padding: 18, marginBottom: 20, border: "1px solid rgba(127,216,255,0.15)" }}>
+      <div style={{ textAlign: "center", color: COLORS.white, fontWeight: 700, fontFamily: DISPLAY_FONT, letterSpacing: 1, marginBottom: 12 }}>{monthName} {year}</div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4, marginBottom: 4 }}>
+        {["S", "M", "T", "W", "T", "F", "S"].map((d, i) => (
+          <div key={i} style={{ textAlign: "center", color: COLORS.dim, fontSize: 11, fontWeight: 600 }}>{d}</div>
+        ))}
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4 }}>
+        {cells.map((d, i) => {
+          if (d === null) return <div key={i} />;
+          const dateStr = `${year}-${String(month + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+          const entries = byDate[dateStr];
+          const isToday = dateStr === todayKey();
+          const isSelected = dateStr === selectedDate;
+          let dotColor = null;
+          if (entries) {
+            const allDone = entries.every((e) => e.completed);
+            const allFailed = entries.every((e) => !e.completed);
+            dotColor = allDone ? COLORS.green : allFailed ? COLORS.red : COLORS.orange;
+          }
+          return (
+            <button key={i} onClick={() => onSelectDate(entries ? dateStr : null)} style={{
+              aspectRatio: "1", borderRadius: 10, border: isSelected ? `1px solid ${COLORS.cyan}` : isToday ? "1px solid rgba(127,216,255,0.4)" : "1px solid transparent",
+              background: isSelected ? "rgba(127,216,255,0.15)" : "transparent", cursor: entries ? "pointer" : "default",
+              color: COLORS.white, fontSize: 13, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 3, fontFamily: BODY_FONT,
+            }}>
+              <span>{d}</span>
+              {dotColor && <span style={{ width: 5, height: 5, borderRadius: "50%", background: dotColor }} />}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 const circleBtnStyle = {
-  width: 36, height: 36, borderRadius: "50%", border: "1px solid rgba(127,216,255,0.3)",
-  background: "rgba(127,216,255,0.08)", color: COLORS.cyan, cursor: "pointer",
+  width: 38, height: 38, borderRadius: "50%", border: "1px solid rgba(127,216,255,0.3)",
+  background: "rgba(127,216,255,0.1)", color: COLORS.cyan, cursor: "pointer",
   display: "flex", alignItems: "center", justifyContent: "center",
 };
 const primaryBtnStyle = {
-  width: "100%", padding: "16px 0", borderRadius: 16, fontWeight: 700, fontSize: 15, letterSpacing: 1.5,
+  width: "100%", padding: "17px 0", borderRadius: 16, fontWeight: 700, fontSize: 16, letterSpacing: 1.5,
   border: "1px solid rgba(127,216,255,0.4)", background: "rgba(127,216,255,0.15)", color: COLORS.cyanBright,
-  cursor: "pointer", fontFamily: DISPLAY_FONT, textTransform: "uppercase",
+  cursor: "pointer", fontFamily: DISPLAY_FONT, textTransform: "uppercase", ...glass,
 };
 const pillBtnStyle = {
-  padding: "10px 18px", borderRadius: 20, fontWeight: 600, fontSize: 12.5, letterSpacing: 0.5,
-  border: "1px solid rgba(127,216,255,0.35)", background: "rgba(127,216,255,0.08)", color: COLORS.cyan,
-  cursor: "pointer", fontFamily: BODY_FONT,
+  padding: "11px 18px", borderRadius: 20, fontWeight: 600, fontSize: 13, letterSpacing: 0.5,
+  border: "1px solid rgba(127,216,255,0.35)", background: "rgba(127,216,255,0.1)", color: COLORS.cyan,
+  cursor: "pointer", fontFamily: BODY_FONT, ...glass,
 };
 const circleBtnStyleBig = {
-  width: 54, height: 54, borderRadius: "50%", border: "1px solid rgba(127,216,255,0.3)",
-  background: "rgba(127,216,255,0.08)", color: COLORS.cyan, fontWeight: 700, fontSize: 13, cursor: "pointer",
+  width: 58, height: 58, borderRadius: "50%", border: "1px solid rgba(127,216,255,0.3)",
+  background: "rgba(127,216,255,0.1)", color: COLORS.cyan, fontWeight: 700, fontSize: 14, cursor: "pointer",
   fontFamily: DISPLAY_FONT,
 };
 const tabBarStyle = {
-  position: "fixed", bottom: 0, left: 0, right: 0, display: "flex", background: "rgba(10,31,46,0.94)",
-  borderTop: "1px solid rgba(127,216,255,0.15)", paddingBottom: "env(safe-area-inset-bottom)", zIndex: 10,
-  backdropFilter: "blur(10px)",
+  position: "fixed", bottom: 0, left: 0, right: 0, display: "flex", background: "rgba(10,31,46,0.75)",
+  borderTop: "1px solid rgba(127,216,255,0.15)", paddingBottom: "env(safe-area-inset-bottom)", zIndex: 10, ...glass,
 };
 function TabButton({ active, label, Icon, onClick }) {
   return (
     <button onClick={onClick} style={{
-      flex: 1, background: "none", border: "none", padding: "12px 0 10px", cursor: "pointer",
-      color: active ? COLORS.cyanBright : COLORS.dim, display: "flex", flexDirection: "column", alignItems: "center", gap: 3,
+      flex: 1, background: "none", border: "none", padding: "13px 0 11px", cursor: "pointer",
+      color: active ? COLORS.cyanBright : COLORS.dim, display: "flex", flexDirection: "column", alignItems: "center", gap: 4,
     }}>
-      <Icon size={19} strokeWidth={active ? 2.4 : 1.8} />
-      <span style={{ fontSize: 11, fontFamily: DISPLAY_FONT, letterSpacing: 1, textTransform: "uppercase" }}>{label}</span>
+      <Icon size={21} strokeWidth={active ? 2.4 : 1.8} />
+      <span style={{ fontSize: 11.5, fontFamily: DISPLAY_FONT, letterSpacing: 1, textTransform: "uppercase" }}>{label}</span>
     </button>
   );
 }
 function ToggleRow({ label, sub, checked, onChange }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: COLORS.bgCard, borderRadius: 16, padding: "16px 18px", marginBottom: 12 }}>
+    <div style={{ ...glass, display: "flex", alignItems: "center", justifyContent: "space-between", background: COLORS.bgCard, borderRadius: 16, padding: "17px 19px", marginBottom: 12, border: "1px solid rgba(127,216,255,0.12)" }}>
       <div>
-        <div style={{ color: COLORS.white, fontWeight: 600, fontSize: 15 }}>{label}</div>
-        {sub && <div style={{ color: COLORS.dim, fontSize: 12, marginTop: 2 }}>{sub}</div>}
+        <div style={{ color: COLORS.white, fontWeight: 600, fontSize: 16 }}>{label}</div>
+        {sub && <div style={{ color: COLORS.dim, fontSize: 12.5, marginTop: 2 }}>{sub}</div>}
       </div>
       <button onClick={() => onChange(!checked)} style={{
-        width: 46, height: 26, borderRadius: 13, border: "none", cursor: "pointer", position: "relative",
+        width: 48, height: 27, borderRadius: 14, border: "none", cursor: "pointer", position: "relative",
         background: checked ? "rgba(127,216,255,0.4)" : "rgba(255,255,255,0.1)", transition: "background 0.2s",
       }}>
-        <div style={{
-          position: "absolute", top: 3, left: checked ? 23 : 3, width: 20, height: 20, borderRadius: "50%",
-          background: checked ? COLORS.cyanBright : COLORS.dim, transition: "left 0.2s",
-        }} />
+        <div style={{ position: "absolute", top: 3, left: checked ? 24 : 3, width: 21, height: 21, borderRadius: "50%", background: checked ? COLORS.cyanBright : COLORS.dim, transition: "left 0.2s" }} />
       </button>
     </div>
   );
@@ -346,39 +410,23 @@ function useLongPress(callback, ms = 900) {
     setPressing(true);
     timer.current = setTimeout(() => { callback(); setPressing(false); }, ms);
   }, [callback, ms]);
-  const clear = useCallback(() => {
-    setPressing(false);
-    if (timer.current) clearTimeout(timer.current);
-  }, []);
+  const clear = useCallback(() => { setPressing(false); if (timer.current) clearTimeout(timer.current); }, []);
   return { pressing, handlers: { onMouseDown: start, onMouseUp: clear, onMouseLeave: clear, onTouchStart: start, onTouchEnd: clear } };
-}
-
-function LongPressButton({ pressing, ms, children, color, handlers }) {
-  return (
-    <div {...handlers} style={{
-      position: "relative", width: "100%", padding: "17px 0", borderRadius: 16, fontWeight: 700, fontSize: 15,
-      letterSpacing: 1, fontFamily: DISPLAY_FONT, textTransform: "uppercase", overflow: "hidden",
-      border: "1px solid rgba(127,216,255,0.2)", cursor: "pointer", textAlign: "center", userSelect: "none",
-      background: "rgba(127,216,255,0.1)", color,
-    }}>
-      <div style={{
-        position: "absolute", inset: 0, background: "rgba(127,216,255,0.35)", transformOrigin: "left",
-        transform: `scaleX(${pressing ? 1 : 0})`, transition: pressing ? `transform ${ms}ms linear` : "transform 0.15s ease-out",
-      }} />
-      <div style={{ position: "relative" }}>{children}</div>
-    </div>
-  );
 }
 
 // ---------------------------------------------------------------------------
 export default function App() {
   const [screen, setScreen] = useState("train");
   const [loaded, setLoaded] = useState(false);
+  const [toast, setToast] = useState(null);
+  const showToast = (msg) => setToast(msg);
+  useEffect(() => { if (!toast) return; const t = setTimeout(() => setToast(null), 2200); return () => clearTimeout(t); }, [toast]);
 
   const [prSeconds, setPrSeconds] = useState(0);
   const [customTables, setCustomTables] = useState([]);
   const [history, setHistory] = useState([]);
   const [hapticsOn, setHapticsOn] = useState(true);
+  const [selectedDate, setSelectedDate] = useState(null);
 
   useEffect(() => {
     (async () => {
@@ -399,9 +447,7 @@ export default function App() {
   useEffect(() => { if (loaded) saveStored("apnea_history", history); }, [history, loaded]);
   useEffect(() => { if (loaded) { saveStored("apnea_settings", { haptics: hapticsOn }); setHapticsEnabled(hapticsOn); } }, [hapticsOn, loaded]);
 
-  const logHistory = useCallback((entry) => {
-    setHistory((h) => [{ id: uid(), date: todayKey(), timestamp: Date.now(), ...entry }, ...h]);
-  }, []);
+  const logHistory = useCallback((entry) => setHistory((h) => [{ id: uid(), date: todayKey(), timestamp: Date.now(), ...entry }, ...h]), []);
   const deleteHistoryEntry = useCallback((id) => setHistory((h) => h.filter((e) => e.id !== id)), []);
 
   const [prDraft, setPrDraft] = useState(60);
@@ -414,10 +460,7 @@ export default function App() {
   const [bleStatus, setBleStatus] = useState("");
   const logHr = useCallback((v) => {
     setHr(v);
-    if (v > 0) {
-      setMinHr((m) => (m === 0 || v < m ? v : m));
-      setMaxHr((m) => (v > m ? v : m));
-    }
+    if (v > 0) { setMinHr((m) => (m === 0 || v < m ? v : m)); setMaxHr((m) => (v > m ? v : m)); }
   }, []);
   const resetHr = () => { setHr(0); setMinHr(0); setMaxHr(0); };
   const connectWatch = async () => {
@@ -445,18 +488,11 @@ export default function App() {
     setCustomTables((c) => [...c, t]);
     setShowCustomModal(false);
     setCtName(""); setCtType("O2"); setCtRounds(8); setCtBreathe(120); setCtHold(60);
+    showToast("Custom table added");
   };
 
   const [pendingTable, setPendingTable] = useState(null);
-  const tpList = () => {
-    const list = [];
-    if (prSeconds > 0) {
-      list.push({ id: "auto-pr", name: "Auto O2 (your PR)", tableType: "O2",
-        baseHold: Math.max(15, Math.round(prSeconds * 0.5)), baseBreathe: 120,
-        step: Math.max(5, Math.round(prSeconds * 0.08)), rounds: 6 });
-    }
-    return [...list, ...PRESETS, ...customTables];
-  };
+  const tpList = () => [autoTable("O2", prSeconds), autoTable("CO2", prSeconds), ...customTables];
 
   const [sTable, setSTable] = useState(null);
   const [sDifficulty, setSDifficulty] = useState("normal");
@@ -519,7 +555,6 @@ export default function App() {
     if (sPhase !== "breathe" && sPhase !== "ready") return;
     transitionPulse(); setSRipple((n) => n + 1); setSContractions(0); setSPhase("hold"); setSTimer(sHoldTime);
   };
-
   const confirmSurface = () => {
     setShowSurfaceConfirm(false);
     setSRunning(false);
@@ -569,27 +604,32 @@ export default function App() {
     setPaMode("result");
   };
 
-  const goTab = (tab) => setScreen(tab);
+  const goTab = (tab) => { setScreen(tab); setSelectedDate(null); };
 
   if (!loaded) {
     return (
       <div style={{ width: "100%", minHeight: "100vh", background: COLORS.bg, display: "flex", alignItems: "center", justifyContent: "center" }}>
-        <Heart size={40} color={COLORS.red} fill={COLORS.red} style={{ animation: "pulseFade 1.4s ease-in-out infinite" }} />
+        <Heart size={44} color={COLORS.red} fill={COLORS.red} style={{ animation: "pulseFade 1.4s ease-in-out infinite" }} />
       </div>
     );
   }
 
+  const sessionTintActive = screen === "session" || screen === "prattempt";
+  const sessionTintMode = screen === "session" ? (sPhase === "hold" ? "hold" : "breathe") : screen === "prattempt" ? (paMode === "attempt" ? "hold" : "breathe") : null;
+
   return (
     <div style={{ width: "100%", minHeight: "100vh", background: COLORS.bg, position: "relative", fontFamily: BODY_FONT, paddingTop: "env(safe-area-inset-top)" }}>
+      <PhaseTint active={sessionTintActive} mode={sessionTintMode} />
       <Bubbles />
-      <div key={screen} style={{ position: "relative", zIndex: 1, paddingBottom: ["train", "pr", "history", "settings"].includes(screen) ? 90 : 40, animation: "fadeIn 0.25s ease-out" }}>
+      <Toast message={toast} />
+      <div key={screen} style={{ position: "relative", zIndex: 1, minHeight: "100vh", display: "flex", flexDirection: "column", paddingBottom: ["train", "pr", "history", "settings"].includes(screen) ? 90 : 0, animation: "fadeIn 0.25s ease-out" }}>
 
         {screen === "train" && (
           <>
-            <div style={{ textAlign: "center", padding: "40px 20px 20px" }}>
-              <div style={{ fontSize: 28, fontWeight: 700, color: COLORS.white, letterSpacing: 3, fontFamily: DISPLAY_FONT, textTransform: "uppercase" }}>Apnea Trainer</div>
-              <div style={{ fontSize: 12, color: COLORS.dim, marginTop: 6, letterSpacing: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 5 }}>
-                {prSeconds > 0 ? <><Star size={12} fill={COLORS.orange} color={COLORS.orange} /> PERSONAL BEST &middot; {formatTime(prSeconds)}</> : "NO PR SET YET"}
+            <div style={{ textAlign: "center", padding: "44px 20px 22px" }}>
+              <div style={{ fontSize: 30, fontWeight: 700, color: COLORS.white, letterSpacing: 3, fontFamily: DISPLAY_FONT, textTransform: "uppercase" }}>Apnea Trainer</div>
+              <div style={{ fontSize: 13, color: COLORS.dim, marginTop: 8, letterSpacing: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+                {prSeconds > 0 ? <><Star size={13} fill={COLORS.orange} color={COLORS.orange} /> PERSONAL BEST &middot; {formatTime(prSeconds)}</> : "NO PR SET YET"}
               </div>
             </div>
             <div style={{ padding: "0 20px" }}>
@@ -597,8 +637,8 @@ export default function App() {
                 <TableCard key={t.id} table={t} onPlay={() => setPendingTable(t)}
                   onDelete={customTables.find((c) => c.id === t.id) ? () => setDeleteTarget({ kind: "custom", id: t.id }) : null} />
               ))}
-              <button onClick={() => setShowCustomModal(true)} style={{ ...primaryBtnStyle, marginTop: 6, background: "rgba(255,255,255,0.04)", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
-                <Plus size={16} /> New custom table
+              <button onClick={() => setShowCustomModal(true)} style={{ ...primaryBtnStyle, marginTop: 8, background: "rgba(255,255,255,0.05)", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+                <Plus size={17} /> New custom table
               </button>
             </div>
           </>
@@ -608,14 +648,16 @@ export default function App() {
           <>
             <ScreenHeader title="Personal Best" />
             <div style={{ padding: "20px 20px", textAlign: "center" }}>
-              <div style={{ fontSize: 58, fontWeight: 700, color: COLORS.white, fontFamily: DISPLAY_FONT, fontVariantNumeric: "tabular-nums" }}>{formatTime(prDraft)}</div>
-              <div style={{ display: "flex", justifyContent: "center", gap: 16, marginTop: 20 }}>
+              <div style={{ fontSize: 66, fontWeight: 700, color: COLORS.white, fontFamily: DISPLAY_FONT, fontVariantNumeric: "tabular-nums" }}>{formatTime(prDraft)}</div>
+              <div style={{ display: "flex", justifyContent: "center", gap: 16, marginTop: 22 }}>
                 <button onClick={() => setPrDraft((v) => Math.max(5, v - 30))} style={circleBtnStyleBig}>&#8722;30</button>
                 <button onClick={() => setPrDraft((v) => Math.max(5, v - 5))} style={circleBtnStyleBig}>&#8722;5</button>
                 <button onClick={() => setPrDraft((v) => v + 5)} style={circleBtnStyleBig}>&#43;5</button>
                 <button onClick={() => setPrDraft((v) => v + 30)} style={circleBtnStyleBig}>&#43;30</button>
               </div>
-              <button onClick={() => setPrSeconds(prDraft)} style={{ ...primaryBtnStyle, marginTop: 24 }}>Save as PR</button>
+              <button onClick={() => { setPrSeconds(prDraft); showToast(`PR saved: ${formatTime(prDraft)}`); }} style={{ ...primaryBtnStyle, marginTop: 26, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+                <Check size={17} /> Save as PR
+              </button>
               <button onClick={startPrAttempt} style={{ ...primaryBtnStyle, marginTop: 14, background: "rgba(127,232,168,0.15)", borderColor: "rgba(127,232,168,0.4)", color: COLORS.greenBright }}>Start PR attempt</button>
             </div>
           </>
@@ -625,35 +667,32 @@ export default function App() {
           <>
             <ScreenHeader title="History" />
             <div style={{ padding: "0 20px" }}>
-              {history.length === 0 && <div style={{ color: COLORS.dim, textAlign: "center", marginTop: 30 }}>No sessions logged yet</div>}
-              {Object.entries(history.reduce((acc, e) => { (acc[e.date] = acc[e.date] || []).push(e); return acc; }, {})).map(([date, entries]) => {
-                const allDone = entries.every((e) => e.completed);
-                const allFailed = entries.every((e) => !e.completed);
-                const dotColor = allDone ? COLORS.green : allFailed ? COLORS.red : COLORS.orange;
+              <CalendarGrid history={history} selectedDate={selectedDate} onSelectDate={setSelectedDate} />
+              {(() => {
+                const dateToShow = selectedDate || todayKey();
+                const entries = history.filter((e) => e.date === dateToShow);
                 return (
-                  <div key={date} style={{ marginBottom: 18 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-                      <div style={{ width: 10, height: 10, borderRadius: "50%", background: dotColor }} />
-                      <div style={{ color: COLORS.dim, fontSize: 13, letterSpacing: 1 }}>{date}</div>
-                    </div>
+                  <>
+                    <div style={{ color: COLORS.dim, fontSize: 13, letterSpacing: 1, marginBottom: 10 }}>{selectedDate ? selectedDate : "TODAY"}</div>
+                    {entries.length === 0 && <div style={{ color: COLORS.dim, textAlign: "center", marginTop: 10, marginBottom: 10 }}>No sessions this day</div>}
                     {entries.map((e) => (
-                      <div key={e.id} style={{ background: COLORS.bgCard, borderRadius: 14, padding: "12px 16px", marginBottom: 8, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                      <div key={e.id} style={{ ...glass, background: COLORS.bgCard, borderRadius: 14, padding: "14px 16px", marginBottom: 8, display: "flex", alignItems: "center", justifyContent: "space-between", border: "1px solid rgba(127,216,255,0.1)" }}>
                         <div>
-                          <div style={{ color: COLORS.white, fontWeight: 600, fontSize: 14 }}>
+                          <div style={{ color: COLORS.white, fontWeight: 600, fontSize: 14.5 }}>
                             {e.name} {e.difficulty && e.difficulty !== "normal" && (
                               <span style={{ color: DIFFICULTIES[e.difficulty].color, fontSize: 11, marginLeft: 6 }}>{DIFFICULTIES[e.difficulty].emoji} {DIFFICULTIES[e.difficulty].label}</span>
                             )}
                             {e.isPR && <span style={{ color: COLORS.green, fontSize: 11, marginLeft: 6 }}>&#9733; PR</span>}
                           </div>
-                          {!e.completed && <div style={{ color: COLORS.red, fontSize: 11, marginTop: 2 }}>FAILED &middot; surfaced on round {e.failedRound}</div>}
-                          {e.duration != null && <div style={{ color: COLORS.dim, fontSize: 11, marginTop: 2 }}>{formatTime(e.duration)}</div>}
+                          {!e.completed && <div style={{ color: COLORS.red, fontSize: 11.5, marginTop: 3 }}>FAILED &middot; surfaced on round {e.failedRound}</div>}
+                          {e.duration != null && <div style={{ color: COLORS.dim, fontSize: 11.5, marginTop: 3 }}>{formatTime(e.duration)}</div>}
                         </div>
-                        <span onClick={() => setDeleteTarget({ kind: "history", id: e.id })} style={{ color: COLORS.red, cursor: "pointer", padding: 6 }}><Trash2 size={16} /></span>
+                        <span onClick={() => setDeleteTarget({ kind: "history", id: e.id })} style={{ color: COLORS.red, cursor: "pointer", padding: 6 }}><Trash2 size={17} /></span>
                       </div>
                     ))}
-                  </div>
+                  </>
                 );
-              })}
+              })()}
             </div>
           </>
         )}
@@ -663,13 +702,13 @@ export default function App() {
             <ScreenHeader title="Settings" />
             <div style={{ padding: "0 20px" }}>
               <ToggleRow label="Haptics" sub="Vibration cues during sessions" checked={hapticsOn} onChange={setHapticsOn} />
-              <button onClick={() => setConfirmResetPr(true)} style={{ ...primaryBtnStyle, marginBottom: 12, background: "rgba(255,255,255,0.04)", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
-                <RotateCcw size={15} /> Reset personal best
+              <button onClick={() => setConfirmResetPr(true)} style={{ ...primaryBtnStyle, marginBottom: 12, background: "rgba(255,255,255,0.05)", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+                <RotateCcw size={16} /> Reset personal best
               </button>
-              <button onClick={() => setConfirmClearHistory(true)} style={{ ...primaryBtnStyle, background: "rgba(255,118,118,0.1)", borderColor: "rgba(255,118,118,0.3)", color: COLORS.red, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
-                <Trash2 size={15} /> Clear history
+              <button onClick={() => setConfirmClearHistory(true)} style={{ ...primaryBtnStyle, background: "rgba(255,118,118,0.12)", borderColor: "rgba(255,118,118,0.3)", color: COLORS.red, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+                <Trash2 size={16} /> Clear history
               </button>
-              <div style={{ textAlign: "center", marginTop: 30, color: COLORS.dim, fontSize: 12, lineHeight: 1.6 }}>
+              <div style={{ textAlign: "center", marginTop: 32, color: COLORS.dim, fontSize: 12.5, lineHeight: 1.6 }}>
                 Apnea Trainer<br />Built for CO2/O2 tables, PR attempts, and live watch HR
               </div>
             </div>
@@ -677,92 +716,125 @@ export default function App() {
         )}
 
         {screen === "session" && sTable && (
-          <div style={{ position: "relative" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "20px 20px 4px" }}>
-              <button onClick={() => setShowExitConfirm(true)} style={{ background: "none", border: "none", color: COLORS.dim, cursor: "pointer" }}><X size={22} /></button>
+          <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "22px 22px 4px" }}>
+              <button onClick={() => setShowExitConfirm(true)} style={{ background: "none", border: "none", color: COLORS.dim, cursor: "pointer" }}><X size={24} /></button>
               <div style={{ textAlign: "center" }}>
-                <div style={{ color: COLORS.dim, fontSize: 12 }}>{sTable.name}</div>
-                <div style={{ color: COLORS.cyan, fontWeight: 700, fontFamily: DISPLAY_FONT, letterSpacing: 2 }}>{sPhase === "done" ? "COMPLETE" : `ROUND ${sRound}/${sTable.rounds}`}</div>
+                <div style={{ color: COLORS.dim, fontSize: 12.5 }}>{sTable.name}</div>
+                <div style={{ color: COLORS.cyan, fontWeight: 700, fontFamily: DISPLAY_FONT, letterSpacing: 2, fontSize: 15 }}>{sPhase === "done" ? "COMPLETE" : `ROUND ${sRound}/${sTable.rounds}`}</div>
               </div>
-              <div style={{ width: 22 }} />
+              <div style={{ width: 24 }} />
             </div>
             {sDifficulty !== "normal" && (
-              <div style={{ textAlign: "center", color: DIFFICULTIES[sDifficulty].color, fontSize: 12, fontWeight: 700, letterSpacing: 2, marginBottom: 4 }}>
+              <div style={{ textAlign: "center", color: DIFFICULTIES[sDifficulty].color, fontSize: 12.5, fontWeight: 700, letterSpacing: 2, marginBottom: 4 }}>
                 {DIFFICULTIES[sDifficulty].emoji} {DIFFICULTIES[sDifficulty].label.toUpperCase()}
               </div>
             )}
-            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "10px 20px" }}
+
+            <div
+              style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "10px 20px", touchAction: "manipulation" }}
               onDoubleClick={skipToHold}
-              onTouchEnd={(e) => { const now = Date.now(); if (now - (e.currentTarget._lastTap || 0) < 300) skipToHold(); e.currentTarget._lastTap = now; }}>
-              <div style={{ position: "relative", marginTop: 12 }}>
+              onTouchEnd={(e) => { const now = Date.now(); if (now - (e.currentTarget._lastTap || 0) < 300) skipToHold(); e.currentTarget._lastTap = now; }}
+              {...(sPhase === "hold" ? contractionLongPress.handlers : {})}
+            >
+              <div style={{ position: "relative" }}>
                 <RippleRings trigger={sRipple} color={sPhase === "breathe" || sPhase === "ready" ? COLORS.green : COLORS.cyan} />
                 <BubbleBurst burstTrigger={sBurst} />
                 <ProgressRing fraction={sRunning || sPhase === "hold" || sPhase === "breathe" ? sFraction : 0} color={sPhase === "breathe" || sPhase === "ready" ? COLORS.green : COLORS.cyan} />
                 <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
-                  <div style={{ fontSize: 13, letterSpacing: 3, color: sPhase === "breathe" || sPhase === "ready" ? COLORS.greenBright : COLORS.cyanBright, fontWeight: 700, fontFamily: DISPLAY_FONT }}>
+                  <div style={{ fontSize: 14, letterSpacing: 3, color: sPhase === "breathe" || sPhase === "ready" ? COLORS.greenBright : COLORS.cyanBright, fontWeight: 700, fontFamily: DISPLAY_FONT }}>
                     {sPhase === "ready" ? "READY" : sPhase === "breathe" ? "BREATHE" : sPhase === "hold" ? "HOLD" : "DONE"}
                   </div>
-                  <div style={{ fontSize: 44, fontWeight: 700, color: COLORS.white, fontFamily: DISPLAY_FONT, fontVariantNumeric: "tabular-nums" }}>{formatTime(sTimer)}</div>
+                  <div style={{ fontSize: 50, fontWeight: 700, color: COLORS.white, fontFamily: DISPLAY_FONT, fontVariantNumeric: "tabular-nums" }}>{formatTime(sTimer)}</div>
                 </div>
               </div>
-              {sPhase === "ready" && !sRunning && <button onClick={() => { setSRunning(true); setSPhase("breathe"); }} style={{ ...primaryBtnStyle, marginTop: 26 }}>Start</button>}
-              {(sPhase === "breathe" || sPhase === "ready") && sRunning && <div style={{ color: COLORS.dim, fontSize: 11, marginTop: 10, letterSpacing: 1 }}>DOUBLE-TAP TO SKIP TO HOLD</div>}
-              {sPhase === "done" && <button onClick={() => beginSession(sTable, sDifficulty)} style={{ ...primaryBtnStyle, marginTop: 26 }}>Restart</button>}
+
+              {sPhase === "ready" && !sRunning && (
+                <button onClick={(e) => { e.stopPropagation(); setSRunning(true); setSPhase("breathe"); }} style={{ ...primaryBtnStyle, marginTop: 30, maxWidth: 280 }}>Start</button>
+              )}
+              {(sPhase === "breathe" || sPhase === "ready") && sRunning && (
+                <div style={{ color: COLORS.dim, fontSize: 12, marginTop: 16, letterSpacing: 1, textAlign: "center" }}>DOUBLE-TAP ANYWHERE TO SKIP TO HOLD</div>
+              )}
+              {sPhase === "done" && (
+                <button onClick={(e) => { e.stopPropagation(); beginSession(sTable, sDifficulty); }} style={{ ...primaryBtnStyle, marginTop: 30, maxWidth: 280 }}>Restart</button>
+              )}
               {sPhase === "hold" && (
-                <div style={{ width: "100%", marginTop: 22 }}>
-                  <LongPressButton pressing={contractionLongPress.pressing} ms={900} color={COLORS.cyanBright} handlers={contractionLongPress.handlers}>
-                    <Zap size={14} style={{ display: "inline", verticalAlign: -2, marginRight: 4 }} />{sContractions} &middot; hold 1s to log
-                  </LongPressButton>
-                  <button onClick={() => setShowSurfaceConfirm(true)} style={{
-                    width: "100%", marginTop: 14, padding: "13px 0", borderRadius: 16, fontWeight: 700, fontSize: 13, letterSpacing: 1,
-                    border: "1px solid rgba(255,118,118,0.4)", background: "rgba(255,118,118,0.1)", color: COLORS.red, cursor: "pointer", fontFamily: DISPLAY_FONT,
-                    display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-                  }}><AlertTriangle size={14} /> I surfaced</button>
+                <div style={{ textAlign: "center", marginTop: 20 }}>
+                  <div style={{
+                    width: 200, height: 3, borderRadius: 2, background: "rgba(127,216,255,0.15)", overflow: "hidden", margin: "0 auto 10px",
+                  }}>
+                    <div style={{ height: "100%", background: COLORS.cyanBright, transformOrigin: "left",
+                      transform: `scaleX(${contractionLongPress.pressing ? 1 : 0})`,
+                      transition: contractionLongPress.pressing ? "transform 900ms linear" : "transform 0.15s ease-out" }} />
+                  </div>
+                  <div style={{ color: COLORS.cyanBright, fontSize: 13, letterSpacing: 1.5, fontFamily: DISPLAY_FONT, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+                    <Zap size={14} /> {sContractions} &middot; HOLD TO LOG
+                  </div>
+                  <div style={{ color: COLORS.dim, fontSize: 11, marginTop: 4, letterSpacing: 1 }}>ANYWHERE ON SCREEN</div>
                 </div>
               )}
-              <div style={{ width: "100%", marginTop: 22 }}>
-                <HrGauge hr={hr} min={minHr} max={maxHr} bleStatus={bleStatus} bleConnected={bleConnected} onConnect={connectWatch} onDisconnect={disconnectWatch} manualHr={hr} setManualHr={logHr} />
-              </div>
+            </div>
+
+            <div style={{ padding: "0 20px 22px" }}>
+              {sPhase === "hold" && (
+                <button onClick={() => setShowSurfaceConfirm(true)} style={{
+                  width: "100%", marginBottom: 14, padding: "13px 0", borderRadius: 16, fontWeight: 700, fontSize: 13, letterSpacing: 1,
+                  border: "1px solid rgba(255,118,118,0.4)", background: "rgba(255,118,118,0.12)", color: COLORS.red, cursor: "pointer", fontFamily: DISPLAY_FONT,
+                  display: "flex", alignItems: "center", justifyContent: "center", gap: 6, ...glass,
+                }}><AlertTriangle size={14} /> I surfaced</button>
+              )}
+              <HrGauge hr={hr} min={minHr} max={maxHr} bleStatus={bleStatus} bleConnected={bleConnected} onConnect={connectWatch} onDisconnect={disconnectWatch} manualHr={hr} setManualHr={logHr} />
             </div>
           </div>
         )}
 
         {screen === "prattempt" && (
-          <div style={{ position: "relative" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "20px 20px 4px" }}>
-              <button onClick={() => setScreen("pr")} style={{ background: "none", border: "none", color: COLORS.dim, cursor: "pointer" }}><X size={22} /></button>
-              <div style={{ color: COLORS.cyan, fontWeight: 700, fontFamily: DISPLAY_FONT, letterSpacing: 2 }}>
+          <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "22px 22px 4px" }}>
+              <button onClick={() => setScreen("pr")} style={{ background: "none", border: "none", color: COLORS.dim, cursor: "pointer" }}><X size={24} /></button>
+              <div style={{ color: COLORS.cyan, fontWeight: 700, fontFamily: DISPLAY_FONT, letterSpacing: 2, fontSize: 15 }}>
                 {paMode === "result" ? "RESULT" : prSeconds > 0 ? `BEAT ${formatTime(prSeconds)}` : "PR ATTEMPT"}
               </div>
-              <div style={{ width: 22 }} />
+              <div style={{ width: 24 }} />
             </div>
-            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "10px 20px" }}>
-              <div style={{ position: "relative", marginTop: 12 }}>
+            <div
+              style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "10px 20px", touchAction: "manipulation" }}
+              onDoubleClick={() => { if (paMode === "breathe") { transitionPulse(); setPaMode("attempt"); setPaElapsed(0); } }}
+              onTouchEnd={(e) => { const now = Date.now(); if (now - (e.currentTarget._lastTap || 0) < 300 && paMode === "breathe") { transitionPulse(); setPaMode("attempt"); setPaElapsed(0); } e.currentTarget._lastTap = now; }}
+              {...(paMode === "attempt" ? paLongPress.handlers : {})}
+            >
+              <div style={{ position: "relative" }}>
                 <BubbleBurst burstTrigger={paBurst} />
                 <ProgressRing fraction={paMode === "attempt" && prSeconds > 0 ? paElapsed / prSeconds : paMode === "breathe" ? 1 - paTimer / 120 : 0} color={paMode === "breathe" ? COLORS.green : COLORS.cyan} />
                 <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
-                  <div style={{ fontSize: 13, letterSpacing: 3, color: paMode === "breathe" ? COLORS.greenBright : COLORS.cyanBright, fontWeight: 700, fontFamily: DISPLAY_FONT }}>
+                  <div style={{ fontSize: 14, letterSpacing: 3, color: paMode === "breathe" ? COLORS.greenBright : COLORS.cyanBright, fontWeight: 700, fontFamily: DISPLAY_FONT }}>
                     {paMode === "breathe" ? "BREATHE UP" : paMode === "attempt" ? "HOLD - GO" : paIsPR ? "NEW PR!" : "GOOD EFFORT"}
                   </div>
-                  <div style={{ fontSize: 44, fontWeight: 700, color: COLORS.white, fontFamily: DISPLAY_FONT, fontVariantNumeric: "tabular-nums" }}>{formatTime(paMode === "breathe" ? paTimer : paElapsed)}</div>
+                  <div style={{ fontSize: 50, fontWeight: 700, color: COLORS.white, fontFamily: DISPLAY_FONT, fontVariantNumeric: "tabular-nums" }}>{formatTime(paMode === "breathe" ? paTimer : paElapsed)}</div>
                 </div>
               </div>
-              {paMode === "breathe" && <button onClick={() => { transitionPulse(); setPaMode("attempt"); setPaElapsed(0); }} style={{ ...primaryBtnStyle, marginTop: 26 }}>Skip to hold</button>}
+              {paMode === "breathe" && <div style={{ color: COLORS.dim, fontSize: 12, marginTop: 16, letterSpacing: 1 }}>DOUBLE-TAP ANYWHERE TO SKIP TO HOLD</div>}
               {paMode === "attempt" && (
-                <>
-                  <div style={{ width: "100%", marginTop: 22 }}>
-                    <LongPressButton pressing={paLongPress.pressing} ms={900} color={COLORS.cyanBright} handlers={paLongPress.handlers}>
-                      <Zap size={14} style={{ display: "inline", verticalAlign: -2, marginRight: 4 }} />{paContractions} &middot; hold 1s to log
-                    </LongPressButton>
+                <div style={{ textAlign: "center", marginTop: 20 }}>
+                  <div style={{ width: 200, height: 3, borderRadius: 2, background: "rgba(127,216,255,0.15)", overflow: "hidden", margin: "0 auto 10px" }}>
+                    <div style={{ height: "100%", background: COLORS.cyanBright, transformOrigin: "left",
+                      transform: `scaleX(${paLongPress.pressing ? 1 : 0})`,
+                      transition: paLongPress.pressing ? "transform 900ms linear" : "transform 0.15s ease-out" }} />
                   </div>
-                  <button onClick={stopPrAttempt} style={{ ...primaryBtnStyle, marginTop: 14, background: "rgba(255,118,118,0.15)", borderColor: "rgba(255,118,118,0.4)", color: COLORS.red }}>Stop</button>
-                </>
-              )}
-              {paMode === "result" && <button onClick={() => setScreen("pr")} style={{ ...primaryBtnStyle, marginTop: 26 }}>Back</button>}
-              {paMode !== "result" && (
-                <div style={{ width: "100%", marginTop: 22 }}>
-                  <HrGauge hr={hr} min={minHr} max={maxHr} bleStatus={bleStatus} bleConnected={bleConnected} onConnect={connectWatch} onDisconnect={disconnectWatch} manualHr={hr} setManualHr={logHr} />
+                  <div style={{ color: COLORS.cyanBright, fontSize: 13, letterSpacing: 1.5, fontFamily: DISPLAY_FONT, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+                    <Zap size={14} /> {paContractions} &middot; HOLD TO LOG
+                  </div>
+                  <div style={{ color: COLORS.dim, fontSize: 11, marginTop: 4, letterSpacing: 1 }}>ANYWHERE ON SCREEN</div>
                 </div>
+              )}
+              {paMode === "result" && <button onClick={(e) => { e.stopPropagation(); setScreen("pr"); }} style={{ ...primaryBtnStyle, marginTop: 30, maxWidth: 280 }}>Back</button>}
+            </div>
+            <div style={{ padding: "0 20px 22px" }}>
+              {paMode === "attempt" && (
+                <button onClick={stopPrAttempt} style={{ ...primaryBtnStyle, marginBottom: 14, background: "rgba(255,118,118,0.15)", borderColor: "rgba(255,118,118,0.4)", color: COLORS.red }}>Stop</button>
+              )}
+              {paMode !== "result" && (
+                <HrGauge hr={hr} min={minHr} max={maxHr} bleStatus={bleStatus} bleConnected={bleConnected} onConnect={connectWatch} onDisconnect={disconnectWatch} manualHr={hr} setManualHr={logHr} />
               )}
             </div>
           </div>
@@ -782,11 +854,11 @@ export default function App() {
 
       {showCustomModal && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(3,15,24,0.9)", zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
-          <div style={{ background: COLORS.bgCard, borderRadius: 18, padding: 22, width: "100%", maxWidth: 360, border: "1px solid rgba(127,216,255,0.2)" }}>
+          <div style={{ ...glass, background: "rgba(10,31,46,0.9)", borderRadius: 18, padding: 22, width: "100%", maxWidth: 360, border: "1px solid rgba(127,216,255,0.2)" }}>
             <div style={{ color: COLORS.white, fontWeight: 700, fontSize: 17, fontFamily: DISPLAY_FONT, marginBottom: 14, textAlign: "center", letterSpacing: 1 }}>NEW CUSTOM TABLE</div>
             <input value={ctName} onChange={(e) => setCtName(e.target.value)} placeholder="Table name" style={{
               width: "100%", padding: "12px 14px", borderRadius: 12, border: "1px solid rgba(127,216,255,0.3)",
-              background: "rgba(255,255,255,0.03)", color: COLORS.white, fontSize: 15, marginBottom: 12, fontFamily: BODY_FONT,
+              background: "rgba(255,255,255,0.04)", color: COLORS.white, fontSize: 15, marginBottom: 12, fontFamily: BODY_FONT,
             }} />
             <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
               {["O2", "CO2"].map((tt) => (
@@ -815,8 +887,8 @@ export default function App() {
           onConfirm={() => { if (deleteTarget.kind === "custom") setCustomTables((c) => c.filter((t) => t.id !== deleteTarget.id)); else deleteHistoryEntry(deleteTarget.id); setDeleteTarget(null); }}
           onCancel={() => setDeleteTarget(null)} />
       )}
-      {confirmClearHistory && <ConfirmModal title="Clear all history?" body="This can't be undone." confirmLabel="Clear" danger onConfirm={() => { setHistory([]); setConfirmClearHistory(false); }} onCancel={() => setConfirmClearHistory(false)} />}
-      {confirmResetPr && <ConfirmModal title="Reset your PR?" body="Your personal best will be cleared." confirmLabel="Reset" danger onConfirm={() => { setPrSeconds(0); setConfirmResetPr(false); }} onCancel={() => setConfirmResetPr(false)} />}
+      {confirmClearHistory && <ConfirmModal title="Clear all history?" body="This can't be undone." confirmLabel="Clear" danger onConfirm={() => { setHistory([]); setConfirmClearHistory(false); showToast("History cleared"); }} onCancel={() => setConfirmClearHistory(false)} />}
+      {confirmResetPr && <ConfirmModal title="Reset your PR?" body="Your personal best will be cleared." confirmLabel="Reset" danger onConfirm={() => { setPrSeconds(0); setConfirmResetPr(false); showToast("PR reset"); }} onCancel={() => setConfirmResetPr(false)} />}
     </div>
   );
 }
