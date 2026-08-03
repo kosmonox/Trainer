@@ -7,7 +7,7 @@ import {
 } from "lucide-react";
 import { loadStored, saveStored } from "./storage.js";
 import { scanAndConnectHrMonitor, disconnectHrMonitor } from "./ble.js";
-import { warningPulse, transitionPulse, minutePulse, prBeatPulse, setHapticsEnabled, testVibrate } from "./haptics.js";
+import { transitionPulse, minutePulse, prBeatPulse, countdownTick, setHapticsEnabled, testVibrate } from "./haptics.js";
 import { Share } from "@capacitor/share";
 
 const COLORS = {
@@ -729,6 +729,7 @@ const STATUS_META = {
   good: { label: "Bon", color: COLORS.green },
   work: { label: "\u00C0 travailler", color: COLORS.orange },
   blocking: { label: "Bloquant", color: COLORS.red },
+  na: { label: "N/A", color: COLORS.dim },
 };
 
 function DiveItemRow({ item, status, note, onSetStatus, onNoteChange }) {
@@ -737,12 +738,12 @@ function DiveItemRow({ item, status, note, onSetStatus, onNoteChange }) {
     <div style={{ background: COLORS.bgCardHi, borderRadius: 14, padding: "12px 14px", marginBottom: 8 }}>
       <div style={{ color: COLORS.white, fontSize: 13.5, lineHeight: 1.4, marginBottom: 4 }}>{item.text}</div>
       <div style={{ color: COLORS.dim, fontSize: 11, marginBottom: 10, fontStyle: "italic" }}>{item.influence}</div>
-      <div style={{ display: "flex", gap: 6 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 6 }}>
         {Object.entries(STATUS_META).map(([key, meta]) => {
           const active = status === key;
           return (
             <button key={key} onClick={() => onSetStatus(key)} style={{
-              flex: 1, padding: "8px 4px", borderRadius: 10, border: `1px solid ${meta.color}${active ? "" : "40"}`,
+              padding: "8px 4px", borderRadius: 10, border: `1px solid ${meta.color}${active ? "" : "40"}`,
               background: active ? `${meta.color}30` : "rgba(255,255,255,0.03)", color: active ? meta.color : COLORS.dim,
               fontSize: 11.5, fontWeight: 700, cursor: "pointer", fontFamily: DISPLAY_FONT,
             }}>{meta.label}</button>
@@ -1055,7 +1056,6 @@ export default function App() {
   const [sBurstBig, setSBurstBig] = useState(0);
   const [showSurfaceConfirm, setShowSurfaceConfirm] = useState(false);
   const [showExitConfirm, setShowExitConfirm] = useState(false);
-  const warnedRef = useRef(false);
 
   const beginSession = (table, difficulty) => {
     const d = DIFFICULTIES[difficulty];
@@ -1070,11 +1070,10 @@ export default function App() {
     if (screen !== "session" || !sRunning) return;
     const id = setTimeout(() => {
       if (sTimer > 1) {
-        if (sTimer === 11 && !warnedRef.current) { warnedRef.current = true; warningPulse(); }
+        if (sTimer >= 2 && sTimer <= 6) countdownTick(sTimer - 1);
         setSTimer(sTimer - 1);
         return;
       }
-      warnedRef.current = false;
       transitionPulse();
       setSRipple((n) => n + 1);
       if (sPhase === "ready" || sPhase === "breathe") {
@@ -1127,7 +1126,7 @@ export default function App() {
     if (screen !== "prattempt") return;
     const id = setInterval(() => {
       if (paMode === "breathe") {
-        setPaTimer((t) => { if (t <= 1) { transitionPulse(); setPaMode("attempt"); return 0; } if (t === 11) warningPulse(); return t - 1; });
+        setPaTimer((t) => { if (t <= 1) { transitionPulse(); setPaMode("attempt"); return 0; } if (t >= 2 && t <= 6) countdownTick(t - 1); return t - 1; });
       } else if (paMode === "attempt") {
         setPaElapsed((t) => {
           const next = t + 1;
