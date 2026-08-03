@@ -1,23 +1,28 @@
 import { Haptics } from "@capacitor/haptics";
+import { mediaVibrate } from "./mediaHaptics.js";
 
 let enabled = true;
 export function setHapticsEnabled(v) { enabled = v; }
 export function getHapticsEnabled() { return enabled; }
 
-// Bypasses our own on/off toggle - used by the "test vibration" button so the
-// signal is purely about whether the phone/OS lets vibration through at all,
-// independent of whatever the in-app Haptics setting is set to.
-export async function testVibrate() {
-  try { await Haptics.vibrate({ duration: 200 }); return true; } catch (e) { console.warn("test vibrate failed", e); return false; }
-}
-
-// Using vibrate(duration) instead of impact() - impact() relies on predefined
-// Android vibration effects that silently no-op on some OS versions/OEM skins.
-// vibrate() uses the basic Vibrator API directly, which is far more universally
-// supported.
+// Tries our custom native plugin first (uses the MEDIA vibration usage category,
+// which works independently of the "Touch feedback" system setting - the same
+// way games/media apps vibrate). Falls back to the stock Capacitor Haptics
+// plugin if the native call fails for any reason.
 async function pulse(ms = 45) {
   if (!enabled) return;
-  try { await Haptics.vibrate({ duration: ms }); } catch (e) { console.warn("haptics failed", e); }
+  try {
+    await mediaVibrate(ms);
+  } catch (e) {
+    try { await Haptics.vibrate({ duration: ms }); } catch (e2) { console.warn("haptics failed", e2); }
+  }
+}
+
+// Bypasses our own on/off toggle - used by the "test vibration" button.
+export async function testVibrate() {
+  try { await mediaVibrate(200); return true; } catch (e) {
+    try { await Haptics.vibrate({ duration: 200 }); return true; } catch (e2) { console.warn("test vibrate failed", e2); return false; }
+  }
 }
 
 export async function warningPulse() {
