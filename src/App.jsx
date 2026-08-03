@@ -81,14 +81,16 @@ const DIVE_PHASES = [
 function computeFocusSummary(entry) {
   if (!entry) return null;
   const workItems = [];
+  const blockingItems = [];
   DIVE_PHASES.forEach((phase) => phase.items.forEach((item) => {
     if (entry.statuses[item.id] === "work") workItems.push(item.text);
+    if (entry.statuses[item.id] === "blocking") blockingItems.push(item.text);
   }));
-  return { objective: entry.objective, blocker: entry.blocker, gear: entry.gear, workItems };
+  return { objective: entry.objective, blocker: entry.blocker, gear: entry.gear, workItems, blockingItems };
 }
 function countWork(entry) {
   let n = 0;
-  DIVE_PHASES.forEach((phase) => phase.items.forEach((item) => { if (entry.statuses[item.id] === "work") n++; }));
+  DIVE_PHASES.forEach((phase) => phase.items.forEach((item) => { if (entry.statuses[item.id] === "work" || entry.statuses[item.id] === "blocking") n++; }));
   return n;
 }
 
@@ -662,43 +664,44 @@ function PrEditSheet({ initial, onSave, onCancel }) {
   );
 }
 
-const STATUS_CYCLE = ["none", "good", "work", "na"];
 const STATUS_META = {
-  none: { label: "Tap to set", color: COLORS.dim, bg: "rgba(255,255,255,0.04)" },
-  good: { label: "Bon", color: COLORS.green, bg: "rgba(127,232,168,0.15)" },
-  work: { label: "\u00C0 travailler", color: COLORS.orange, bg: "rgba(244,177,63,0.15)" },
-  na: { label: "N/A", color: COLORS.dim, bg: "rgba(255,255,255,0.06)" },
+  good: { label: "Bon", color: COLORS.green },
+  work: { label: "\u00C0 travailler", color: COLORS.orange },
+  blocking: { label: "Bloquant", color: COLORS.red },
 };
 
-function DiveItemRow({ item, status, note, onCycle, onNoteChange }) {
+function DiveItemRow({ item, status, note, onSetStatus, onNoteChange }) {
   const [showNote, setShowNote] = useState(!!note);
-  const meta = STATUS_META[status || "none"];
   return (
     <div style={{ background: COLORS.bgCardHi, borderRadius: 14, padding: "12px 14px", marginBottom: 8 }}>
-      <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
-        <button onClick={onCycle} style={{
-          flexShrink: 0, marginTop: 1, minWidth: 84, padding: "6px 10px", borderRadius: 10, border: `1px solid ${meta.color}55`,
-          background: meta.bg, color: meta.color, fontSize: 11.5, fontWeight: 700, cursor: "pointer", fontFamily: DISPLAY_FONT, letterSpacing: 0.5,
-        }}>{meta.label}</button>
-        <div style={{ flex: 1 }}>
-          <div style={{ color: COLORS.white, fontSize: 13.5, lineHeight: 1.4 }}>{item.text}</div>
-          <div style={{ color: COLORS.dim, fontSize: 11, marginTop: 4, fontStyle: "italic" }}>{item.influence}</div>
-          {showNote ? (
-            <textarea value={note || ""} onChange={(e) => onNoteChange(e.target.value)} placeholder="Note personnelle..." rows={2} style={{
-              width: "100%", marginTop: 8, padding: "8px 10px", borderRadius: 8, border: "1px solid rgba(127,216,255,0.2)",
-              background: "rgba(255,255,255,0.03)", color: COLORS.white, fontSize: 12.5, fontFamily: BODY_FONT, resize: "vertical",
-            }} />
-          ) : (
-            <button onClick={() => setShowNote(true)} style={{ background: "none", border: "none", color: COLORS.cyan, fontSize: 11.5, marginTop: 6, cursor: "pointer", padding: 0 }}>+ ajouter une note</button>
-          )}
-        </div>
+      <div style={{ color: COLORS.white, fontSize: 13.5, lineHeight: 1.4, marginBottom: 4 }}>{item.text}</div>
+      <div style={{ color: COLORS.dim, fontSize: 11, marginBottom: 10, fontStyle: "italic" }}>{item.influence}</div>
+      <div style={{ display: "flex", gap: 6 }}>
+        {Object.entries(STATUS_META).map(([key, meta]) => {
+          const active = status === key;
+          return (
+            <button key={key} onClick={() => onSetStatus(key)} style={{
+              flex: 1, padding: "8px 4px", borderRadius: 10, border: `1px solid ${meta.color}${active ? "" : "40"}`,
+              background: active ? `${meta.color}30` : "rgba(255,255,255,0.03)", color: active ? meta.color : COLORS.dim,
+              fontSize: 11.5, fontWeight: 700, cursor: "pointer", fontFamily: DISPLAY_FONT,
+            }}>{meta.label}</button>
+          );
+        })}
       </div>
+      {showNote ? (
+        <textarea value={note || ""} onChange={(e) => onNoteChange(e.target.value)} placeholder="Note personnelle..." rows={2} style={{
+          width: "100%", marginTop: 10, padding: "8px 10px", borderRadius: 8, border: "1px solid rgba(127,216,255,0.2)",
+          background: "rgba(255,255,255,0.03)", color: COLORS.white, fontSize: 12.5, fontFamily: BODY_FONT, resize: "vertical",
+        }} />
+      ) : (
+        <button onClick={() => setShowNote(true)} style={{ background: "none", border: "none", color: COLORS.cyan, fontSize: 11.5, marginTop: 8, cursor: "pointer", padding: 0 }}>+ ajouter une note</button>
+      )}
     </div>
   );
 }
 
-function PhaseAccordion({ phase, expanded, onToggle, statuses, notes, onCycle, onNoteChange }) {
-  const doneCount = phase.items.filter((it) => statuses[it.id] && statuses[it.id] !== "none").length;
+function PhaseAccordion({ phase, expanded, onToggle, statuses, notes, onSetStatus, onNoteChange }) {
+  const doneCount = phase.items.filter((it) => !!statuses[it.id]).length;
   return (
     <div style={{ ...glass, background: COLORS.bgCard, borderRadius: 16, marginBottom: 12, border: "1px solid rgba(127,216,255,0.12)", overflow: "hidden" }}>
       <button onClick={onToggle} style={{ width: "100%", padding: "16px 18px", background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
@@ -712,7 +715,7 @@ function PhaseAccordion({ phase, expanded, onToggle, statuses, notes, onCycle, o
         <div style={{ padding: "0 14px 14px" }}>
           {phase.items.map((item) => (
             <DiveItemRow key={item.id} item={item} status={statuses[item.id]} note={notes[item.id]}
-              onCycle={() => onCycle(item.id)} onNoteChange={(v) => onNoteChange(item.id, v)} />
+              onSetStatus={(s) => onSetStatus(item.id, s)} onNoteChange={(v) => onNoteChange(item.id, v)} />
           ))}
         </div>
       )}
@@ -731,13 +734,7 @@ function DiveLogForm({ onSave, onCancel }) {
   const [blocker, setBlocker] = useState("");
   const [gear, setGear] = useState("");
 
-  const cycleStatus = (itemId) => {
-    setStatuses((s) => {
-      const current = s[itemId] || "none";
-      const next = STATUS_CYCLE[(STATUS_CYCLE.indexOf(current) + 1) % STATUS_CYCLE.length];
-      return { ...s, [itemId]: next };
-    });
-  };
+  const setItemStatus = (itemId, status) => setStatuses((s) => ({ ...s, [itemId]: status }));
   const updateNote = (itemId, value) => setNotes((n) => ({ ...n, [itemId]: value }));
 
   const handleSave = () => {
@@ -779,7 +776,7 @@ function DiveLogForm({ onSave, onCancel }) {
         {DIVE_PHASES.map((phase) => (
           <PhaseAccordion key={phase.id} phase={phase} expanded={expandedPhase === phase.id}
             onToggle={() => setExpandedPhase(expandedPhase === phase.id ? null : phase.id)}
-            statuses={statuses} notes={notes} onCycle={cycleStatus} onNoteChange={updateNote} />
+            statuses={statuses} notes={notes} onSetStatus={setItemStatus} onNoteChange={updateNote} />
         ))}
 
         <div style={{ ...glass, background: COLORS.bgCard, borderRadius: 16, padding: 16, marginTop: 4, border: "1px solid rgba(244,177,63,0.25)" }}>
@@ -831,6 +828,16 @@ function DiveFocusCard({ entry }) {
         <div style={{ marginBottom: 10 }}>
           <div style={{ color: COLORS.dim, fontSize: 11 }}>Facteur limitant</div>
           <div style={{ color: COLORS.white, fontSize: 14 }}>{summary.blocker}</div>
+        </div>
+      )}
+      {summary.blockingItems.length > 0 && (
+        <div style={{ marginBottom: 10 }}>
+          <div style={{ color: COLORS.red, fontSize: 11, marginBottom: 4 }}>Bloquant</div>
+          {summary.blockingItems.map((t, i) => (
+            <div key={i} style={{ color: COLORS.red, fontSize: 12.5, marginBottom: 3, display: "flex", gap: 6 }}>
+              <span>&#8226;</span><span>{t}</span>
+            </div>
+          ))}
         </div>
       )}
       {summary.workItems.length > 0 && (
