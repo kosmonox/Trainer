@@ -4,6 +4,13 @@ let enabled = true;
 export function setHapticsEnabled(v) { enabled = v; }
 export function getHapticsEnabled() { return enabled; }
 
+// Bypasses our own on/off toggle - used by the "test vibration" button so the
+// signal is purely about whether the phone/OS lets vibration through at all,
+// independent of whatever the in-app Haptics setting is set to.
+export async function testVibrate() {
+  try { await Haptics.vibrate({ duration: 200 }); return true; } catch (e) { console.warn("test vibrate failed", e); return false; }
+}
+
 // Using vibrate(duration) instead of impact() - impact() relies on predefined
 // Android vibration effects that silently no-op on some OS versions/OEM skins.
 // vibrate() uses the basic Vibrator API directly, which is far more universally
