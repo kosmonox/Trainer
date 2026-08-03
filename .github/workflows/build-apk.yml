@@ -43,8 +43,16 @@ jobs:
       - name: Apply custom app icon
         run: |
           for density in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
+            mkdir -p android/app/src/main/res/mipmap-$density
             cp icons/mipmap-$density/*.png android/app/src/main/res/mipmap-$density/
           done
+          mkdir -p android/app/src/main/res/mipmap-anydpi-v26
+          cp icons/mipmap-anydpi-v26/*.xml android/app/src/main/res/mipmap-anydpi-v26/
+
+      - name: Apply custom splash screen
+        run: |
+          mkdir -p android/app/src/main/res/drawable
+          cp splash/splash.png android/app/src/main/res/drawable/splash.png
 
       - name: Apply custom native plugin (MEDIA-usage haptics)
         run: |
