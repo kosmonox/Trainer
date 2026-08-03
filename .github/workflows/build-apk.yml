@@ -46,6 +46,13 @@ jobs:
             cp icons/mipmap-$density/*.png android/app/src/main/res/mipmap-$density/
           done
 
+      - name: Apply custom native plugin (MEDIA-usage haptics)
+        run: |
+          PKG_DIR=android/app/src/main/java/com/apneatrainer/app
+          mkdir -p "$PKG_DIR"
+          cp native/MediaHapticsPlugin.java "$PKG_DIR/"
+          cp native/MainActivity.java "$PKG_DIR/"
+
       - name: Make gradlew executable
         run: chmod +x android/gradlew
 
