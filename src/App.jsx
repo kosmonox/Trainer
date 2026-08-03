@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import {
   Heart, Play, Trash2, X, Zap, AlertTriangle, Plus, Minus,
   Bluetooth, Dumbbell, Timer, BarChart3, Settings2, Star,
-  Clock, Layers, TrendingUp, RotateCcw, Check,
+  Clock, Layers, TrendingUp, RotateCcw, Check, Pencil, ListPlus,
 } from "lucide-react";
 import { loadStored, saveStored } from "./storage.js";
 import { scanAndConnectHrMonitor, disconnectHrMonitor } from "./ble.js";
@@ -41,6 +41,16 @@ function formatTime(totalSeconds) {
 function todayKey() { return new Date().toISOString().slice(0, 10); }
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
 
+function fireMiniBurst(x, y) {
+  window.dispatchEvent(new CustomEvent("miniburst", { detail: { x, y } }));
+}
+function getEventXY(e) {
+  if (e.clientX != null && e.clientY != null && (e.clientX !== 0 || e.clientY !== 0)) return { x: e.clientX, y: e.clientY };
+  const t = (e.changedTouches && e.changedTouches[0]) || (e.touches && e.touches[0]);
+  if (t) return { x: t.clientX, y: t.clientY };
+  return { x: window.innerWidth / 2, y: window.innerHeight / 2 };
+}
+
 function autoTable(type, prSeconds) {
   if (type === "O2") {
     const hold = prSeconds > 0 ? Math.max(15, Math.round(prSeconds * 0.5)) : 60;
@@ -52,7 +62,9 @@ function autoTable(type, prSeconds) {
   return { id: "auto-co2", name: "CO2 Table", tableType: "CO2", baseHold: hold, baseBreathe: 150, step, rounds: 8 };
 }
 
+// Works for both algorithmic ("simple") tables and explicit-per-round ("advanced") tables.
 function computeRoundPreview(table) {
+  if (table.advanced) return table.customRounds.map((r) => ({ hold: r.hold, breathe: r.breathe }));
   let breathe = table.baseBreathe, hold = table.baseHold;
   const rounds = [];
   for (let i = 0; i < table.rounds; i++) {
@@ -124,6 +136,40 @@ function BubbleBurst({ burstTrigger }) {
           animation: `burstOut 1s ease-out ${p.delay}s forwards`, "--dx": `${dx}px`, "--dy": `${dy}px`,
         }} />;
       })}
+    </div>
+  );
+}
+
+function MiniBurstLayer() {
+  const [bursts, setBursts] = useState([]);
+  useEffect(() => {
+    const handler = (e) => {
+      const id = uid();
+      const { x, y } = e.detail;
+      const particles = Array.from({ length: 8 }).map(() => ({
+        angle: Math.random() * 360, dist: 16 + Math.random() * 22, size: 2 + Math.random() * 3.5,
+      }));
+      setBursts((b) => [...b, { id, x, y, particles }]);
+      setTimeout(() => setBursts((b) => b.filter((it) => it.id !== id)), 550);
+    };
+    window.addEventListener("miniburst", handler);
+    return () => window.removeEventListener("miniburst", handler);
+  }, []);
+  return (
+    <div style={{ position: "fixed", inset: 0, pointerEvents: "none", zIndex: 55 }}>
+      {bursts.map((b) => (
+        <div key={b.id} style={{ position: "absolute", left: b.x, top: b.y }}>
+          {b.particles.map((p, i) => {
+            const rad = (p.angle * Math.PI) / 180;
+            const dx = Math.cos(rad) * p.dist, dy = Math.sin(rad) * p.dist;
+            return <div key={i} style={{
+              position: "absolute", width: p.size, height: p.size, borderRadius: "50%",
+              background: COLORS.cyanBright, boxShadow: "0 0 4px rgba(168,232,255,0.9)",
+              animation: "miniBurstOut 0.5s ease-out forwards", "--dx": `${dx}px`, "--dy": `${dy}px`,
+            }} />;
+          })}
+        </div>
+      ))}
     </div>
   );
 }
@@ -209,13 +255,13 @@ function TableCard({ table, onPlay, onDelete }) {
     <div style={{ ...glass, background: COLORS.bgCard, borderRadius: 22, padding: "22px 22px 20px", marginBottom: 16, border: "1px solid rgba(127,216,255,0.15)" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <span style={{ display: "inline-block", padding: "5px 11px", borderRadius: 8, fontSize: 12, fontWeight: 700, letterSpacing: 1, color: badgeColor, background: `${badgeColor}22`, fontFamily: DISPLAY_FONT }}>
-          {table.tableType} TABLE
+          {table.tableType} TABLE {table.advanced && "\u00B7 ADV"}
         </span>
         {onDelete && <span onClick={onDelete} style={{ color: COLORS.red, cursor: "pointer", padding: 4 }}><Trash2 size={17} /></span>}
       </div>
       <div style={{ color: COLORS.white, fontWeight: 700, fontSize: 22, fontFamily: DISPLAY_FONT, marginTop: 10, marginBottom: 8 }}>{table.name}</div>
       <div style={{ display: "flex", gap: 18, color: COLORS.dim, fontSize: 13.5, marginBottom: 18, flexWrap: "wrap" }}>
-        <span style={{ display: "flex", alignItems: "center", gap: 5 }}><Layers size={14} /> {table.rounds} rounds</span>
+        <span style={{ display: "flex", alignItems: "center", gap: 5 }}><Layers size={14} /> {rounds.length} rounds</span>
         <span style={{ display: "flex", alignItems: "center", gap: 5 }}><Clock size={14} /> {formatTime(totalSeconds)}</span>
         <span style={{ display: "flex", alignItems: "center", gap: 5, color: badgeColor }}><TrendingUp size={14} /> max {formatTime(maxHold)}</span>
       </div>
@@ -229,7 +275,7 @@ function TableCard({ table, onPlay, onDelete }) {
           return <div key={i} style={{ flex: 1, height: h, background: color, borderRadius: 3 }} />;
         })}
       </div>
-      <button onClick={onPlay} style={{
+      <button onClick={(e) => { const { x, y } = getEventXY(e); fireMiniBurst(x, y); onPlay(); }} style={{
         width: 48, height: 48, borderRadius: "50%", border: `1px solid ${badgeColor}66`, background: `${badgeColor}18`,
         color: badgeColor, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
       }}><Play size={19} fill={badgeColor} /></button>
@@ -246,6 +292,15 @@ function Stepper({ label, value, onDec, onInc }) {
         <div style={{ color: COLORS.white, fontWeight: 700, fontSize: 18, minWidth: 56, textAlign: "center", fontFamily: DISPLAY_FONT }}>{value}</div>
         <button onClick={onInc} style={circleBtnStyle}><Plus size={16} /></button>
       </div>
+    </div>
+  );
+}
+function MiniStepper({ value, onDec, onInc }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+      <button onClick={onDec} style={{ ...circleBtnStyle, width: 26, height: 26 }}><Minus size={11} /></button>
+      <div style={{ color: COLORS.white, fontWeight: 700, fontSize: 13, minWidth: 30, textAlign: "center", fontFamily: DISPLAY_FONT }}>{value}</div>
+      <button onClick={onInc} style={{ ...circleBtnStyle, width: 26, height: 26 }}><Plus size={11} /></button>
     </div>
   );
 }
@@ -271,7 +326,7 @@ function DifficultyPicker({ onPick, onCancel }) {
       <div style={{ ...glass, background: "rgba(10,31,46,0.9)", borderRadius: "20px 20px 0 0", padding: 22, width: "100%", border: "1px solid rgba(127,216,255,0.2)" }}>
         <div style={{ color: COLORS.white, fontWeight: 700, fontSize: 18, fontFamily: DISPLAY_FONT, marginBottom: 14, textAlign: "center" }}>Choose intensity</div>
         {Object.entries(DIFFICULTIES).map(([key, d]) => (
-          <button key={key} onClick={() => onPick(key)} style={{
+          <button key={key} onClick={(e) => { const { x, y } = getEventXY(e); fireMiniBurst(x, y); onPick(key); }} style={{
             width: "100%", textAlign: "left", background: "rgba(255,255,255,0.03)", border: `1px solid ${d.color}55`,
             borderRadius: 14, padding: "14px 16px", marginBottom: 10, cursor: "pointer",
           }}>
@@ -415,6 +470,139 @@ function useLongPress(callback, ms = 900) {
 }
 
 // ---------------------------------------------------------------------------
+// Custom table creation modal - simple mode (with optional PR-based prefill and
+// an editable increment) or advanced mode (explicit per-round editing).
+// ---------------------------------------------------------------------------
+function CustomTableModal({ prSeconds, onAdd, onCancel }) {
+  const [name, setName] = useState("");
+  const [type, setType] = useState("O2");
+  const [rounds, setRounds] = useState(8);
+  const [breathe, setBreathe] = useState(120);
+  const [hold, setHold] = useState(60);
+  const [step, setStep] = useState(15);
+  const [advanced, setAdvanced] = useState(false);
+  const [customRounds, setCustomRounds] = useState(null);
+
+  const applyPrBase = () => {
+    if (prSeconds <= 0) return;
+    setHold(Math.max(15, Math.round(prSeconds * 0.5)));
+    setStep(Math.max(5, Math.round(prSeconds * (type === "O2" ? 0.08 : 0.06))));
+    setBreathe(type === "O2" ? 120 : 150);
+  };
+
+  const enterAdvanced = () => {
+    const plan = computeRoundPreview({ tableType: type, baseHold: hold, baseBreathe: breathe, step, rounds });
+    setCustomRounds(plan);
+    setAdvanced(true);
+  };
+  const backToSimple = () => setAdvanced(false);
+
+  const addRound = () => setCustomRounds((r) => [...r, { ...r[r.length - 1] }]);
+  const removeRound = (i) => setCustomRounds((r) => r.filter((_, idx) => idx !== i));
+  const updateRound = (i, field, delta) => setCustomRounds((r) => r.map((rd, idx) => idx === i ? { ...rd, [field]: Math.max(5, rd[field] + delta) } : rd));
+
+  const handleAdd = () => {
+    if (advanced) {
+      onAdd({ id: uid(), name: name.trim() || "Custom table", tableType: type, advanced: true, customRounds });
+    } else {
+      onAdd({ id: uid(), name: name.trim() || "Custom table", tableType: type, baseHold: hold, baseBreathe: breathe, step, rounds });
+    }
+  };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(3,15,24,0.92)", zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", padding: 20, overflowY: "auto" }}>
+      <div style={{ ...glass, background: "rgba(10,31,46,0.92)", borderRadius: 18, padding: 22, width: "100%", maxWidth: 380, border: "1px solid rgba(127,216,255,0.2)", maxHeight: "88vh", overflowY: "auto" }}>
+        <div style={{ color: COLORS.white, fontWeight: 700, fontSize: 17, fontFamily: DISPLAY_FONT, marginBottom: 14, textAlign: "center", letterSpacing: 1 }}>
+          {advanced ? "CUSTOMIZE ROUNDS" : "NEW CUSTOM TABLE"}
+        </div>
+
+        {!advanced && (
+          <>
+            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Table name" style={{
+              width: "100%", padding: "12px 14px", borderRadius: 12, border: "1px solid rgba(127,216,255,0.3)",
+              background: "rgba(255,255,255,0.04)", color: COLORS.white, fontSize: 15, marginBottom: 12, fontFamily: BODY_FONT,
+            }} />
+            <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
+              {["O2", "CO2"].map((tt) => (
+                <button key={tt} onClick={() => setType(tt)} style={{
+                  flex: 1, padding: "12px 0", borderRadius: 12, fontWeight: 700, fontSize: 14, cursor: "pointer", fontFamily: DISPLAY_FONT,
+                  border: type === tt ? `1px solid ${COLORS.cyan}` : "1px solid rgba(127,216,255,0.15)",
+                  background: type === tt ? "rgba(127,216,255,0.15)" : "transparent", color: type === tt ? COLORS.cyanBright : COLORS.dim,
+                }}>{tt}</button>
+              ))}
+            </div>
+            {prSeconds > 0 && (
+              <button onClick={applyPrBase} style={{ ...pillBtnStyle, width: "100%", textAlign: "center", marginBottom: 12, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+                <Star size={13} /> Base on my PR ({formatTime(prSeconds)})
+              </button>
+            )}
+            <Stepper label="Rounds" value={rounds} onDec={() => setRounds((v) => Math.max(1, v - 1))} onInc={() => setRounds((v) => v + 1)} />
+            <Stepper label="Breathe (s)" value={breathe} onDec={() => setBreathe((v) => Math.max(15, v - 5))} onInc={() => setBreathe((v) => v + 5)} />
+            <Stepper label="Hold (s)" value={hold} onDec={() => setHold((v) => Math.max(15, v - 5))} onInc={() => setHold((v) => v + 5)} />
+            <Stepper label="Increment (s)" value={step} onDec={() => setStep((v) => Math.max(5, v - 5))} onInc={() => setStep((v) => v + 5)} />
+            <button onClick={enterAdvanced} style={{ ...pillBtnStyle, width: "100%", textAlign: "center", marginTop: 4, marginBottom: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+              <ListPlus size={14} /> Customize each round
+            </button>
+          </>
+        )}
+
+        {advanced && customRounds && (
+          <>
+            <div style={{ maxHeight: 280, overflowY: "auto", marginBottom: 12 }}>
+              {customRounds.map((r, i) => (
+                <div key={i} style={{ background: COLORS.bgCardHi, borderRadius: 12, padding: "10px 12px", marginBottom: 8, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                  <div style={{ color: COLORS.dim, fontSize: 12, fontWeight: 700, minWidth: 46 }}>R{i + 1}</div>
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
+                    <div style={{ color: COLORS.dim, fontSize: 9, letterSpacing: 0.5 }}>BREATHE</div>
+                    <MiniStepper value={r.breathe} onDec={() => updateRound(i, "breathe", -5)} onInc={() => updateRound(i, "breathe", 5)} />
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
+                    <div style={{ color: COLORS.dim, fontSize: 9, letterSpacing: 0.5 }}>HOLD</div>
+                    <MiniStepper value={r.hold} onDec={() => updateRound(i, "hold", -5)} onInc={() => updateRound(i, "hold", 5)} />
+                  </div>
+                  {customRounds.length > 1 && <span onClick={() => removeRound(i)} style={{ color: COLORS.red, cursor: "pointer", padding: 4 }}><Trash2 size={14} /></span>}
+                </div>
+              ))}
+            </div>
+            <button onClick={addRound} style={{ ...pillBtnStyle, width: "100%", textAlign: "center", marginBottom: 12, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+              <Plus size={14} /> Add round
+            </button>
+            <button onClick={backToSimple} style={{ ...pillBtnStyle, width: "100%", textAlign: "center", marginBottom: 14 }}>Back to simple mode</button>
+          </>
+        )}
+
+        <div style={{ display: "flex", gap: 10 }}>
+          <button onClick={onCancel} style={{ ...pillBtnStyle, flex: 1, textAlign: "center" }}>Cancel</button>
+          <button onClick={handleAdd} style={{ ...pillBtnStyle, flex: 1, textAlign: "center", background: "rgba(127,216,255,0.2)" }}>Add</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PrEditSheet({ initial, onSave, onCancel }) {
+  const [draft, setDraft] = useState(initial);
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(3,15,24,0.85)", zIndex: 50, display: "flex", alignItems: "flex-end" }}>
+      <div style={{ ...glass, background: "rgba(10,31,46,0.92)", borderRadius: "20px 20px 0 0", padding: 24, width: "100%", border: "1px solid rgba(127,216,255,0.2)" }}>
+        <div style={{ color: COLORS.white, fontWeight: 700, fontSize: 17, fontFamily: DISPLAY_FONT, marginBottom: 18, textAlign: "center", letterSpacing: 1 }}>SET PERSONAL BEST</div>
+        <div style={{ textAlign: "center", fontSize: 56, fontWeight: 700, color: COLORS.white, fontFamily: DISPLAY_FONT, fontVariantNumeric: "tabular-nums", marginBottom: 20 }}>{formatTime(draft)}</div>
+        <div style={{ display: "flex", justifyContent: "center", gap: 14, marginBottom: 22 }}>
+          <button onClick={() => setDraft((v) => Math.max(5, v - 30))} style={circleBtnStyleBig}>&#8722;30</button>
+          <button onClick={() => setDraft((v) => Math.max(5, v - 5))} style={circleBtnStyleBig}>&#8722;5</button>
+          <button onClick={() => setDraft((v) => v + 5)} style={circleBtnStyleBig}>&#43;5</button>
+          <button onClick={() => setDraft((v) => v + 30)} style={circleBtnStyleBig}>&#43;30</button>
+        </div>
+        <div style={{ display: "flex", gap: 10 }}>
+          <button onClick={onCancel} style={{ ...pillBtnStyle, flex: 1, textAlign: "center" }}>Cancel</button>
+          <button onClick={() => onSave(draft)} style={{ ...pillBtnStyle, flex: 1, textAlign: "center", background: "rgba(127,216,255,0.2)", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}><Check size={14} /> Save</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 export default function App() {
   const [screen, setScreen] = useState("train");
   const [loaded, setLoaded] = useState(false);
@@ -427,6 +615,7 @@ export default function App() {
   const [history, setHistory] = useState([]);
   const [hapticsOn, setHapticsOn] = useState(true);
   const [selectedDate, setSelectedDate] = useState(null);
+  const [showPrEdit, setShowPrEdit] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -450,8 +639,10 @@ export default function App() {
   const logHistory = useCallback((entry) => setHistory((h) => [{ id: uid(), date: todayKey(), timestamp: Date.now(), ...entry }, ...h]), []);
   const deleteHistoryEntry = useCallback((id) => setHistory((h) => h.filter((e) => e.id !== id)), []);
 
-  const [prDraft, setPrDraft] = useState(60);
-  useEffect(() => { setPrDraft(prSeconds || 60); }, [prSeconds]);
+  const prAttemptStats = (() => {
+    const attempts = history.filter((e) => e.type === "pr");
+    return { count: attempts.length, last: attempts[0] || null };
+  })();
 
   const [hr, setHr] = useState(0);
   const [minHr, setMinHr] = useState(0);
@@ -474,20 +665,13 @@ export default function App() {
   const disconnectWatch = async () => { await disconnectHrMonitor(); setBleConnected(false); setBleStatus("Disconnected"); };
 
   const [showCustomModal, setShowCustomModal] = useState(false);
-  const [ctName, setCtName] = useState("");
-  const [ctType, setCtType] = useState("O2");
-  const [ctRounds, setCtRounds] = useState(8);
-  const [ctBreathe, setCtBreathe] = useState(120);
-  const [ctHold, setCtHold] = useState(60);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [confirmClearHistory, setConfirmClearHistory] = useState(false);
   const [confirmResetPr, setConfirmResetPr] = useState(false);
 
-  const addCustomTable = () => {
-    const t = { id: uid(), name: ctName.trim() || "Custom table", tableType: ctType, baseHold: ctHold, baseBreathe: ctBreathe, step: 15, rounds: ctRounds };
+  const addCustomTable = (t) => {
     setCustomTables((c) => [...c, t]);
     setShowCustomModal(false);
-    setCtName(""); setCtType("O2"); setCtRounds(8); setCtBreathe(120); setCtHold(60);
     showToast("Custom table added");
   };
 
@@ -496,6 +680,7 @@ export default function App() {
 
   const [sTable, setSTable] = useState(null);
   const [sDifficulty, setSDifficulty] = useState("normal");
+  const [sRoundsPlan, setSRoundsPlan] = useState([]);
   const [sRound, setSRound] = useState(1);
   const [sPhase, setSPhase] = useState("ready");
   const [sTimer, setSTimer] = useState(0);
@@ -511,11 +696,10 @@ export default function App() {
 
   const beginSession = (table, difficulty) => {
     const d = DIFFICULTIES[difficulty];
-    const scaledBreathe = Math.round(table.baseBreathe * d.breatheMul);
-    const scaledHold = Math.round(table.baseHold * d.holdMul);
-    setSTable(table); setSDifficulty(difficulty); setSRound(1);
-    setSHoldTime(scaledHold); setSBreatheTime(scaledBreathe);
-    setSPhase("ready"); setSTimer(scaledBreathe); setSRunning(false); setSContractions(0);
+    const plan = computeRoundPreview(table).map((r) => ({ hold: Math.round(r.hold * d.holdMul), breathe: Math.round(r.breathe * d.breatheMul) }));
+    setSTable(table); setSDifficulty(difficulty); setSRoundsPlan(plan); setSRound(1);
+    setSHoldTime(plan[0].hold); setSBreatheTime(plan[0].breathe);
+    setSPhase("ready"); setSTimer(plan[0].breathe); setSRunning(false); setSContractions(0);
     resetHr(); setPendingTable(null); setScreen("session");
   };
 
@@ -534,19 +718,17 @@ export default function App() {
         setSContractions(0); setSPhase("hold"); setSTimer(sHoldTime);
       } else {
         const nextRound = sRound + 1;
-        if (nextRound > sTable.rounds) {
+        if (nextRound > sRoundsPlan.length) {
           setSRunning(false); setSPhase("done"); setSBurst((n) => n + 1);
           logHistory({ type: "table", name: sTable.name, difficulty: sDifficulty, completed: true, failedRound: null });
         } else {
-          let nh = sHoldTime, nb = sBreatheTime;
-          if (sTable.tableType === "CO2") nb = Math.max(15, sBreatheTime - sTable.step);
-          else nh = sHoldTime + sTable.step;
-          setSHoldTime(nh); setSBreatheTime(nb); setSRound(nextRound); setSPhase("breathe"); setSTimer(nb);
+          const next = sRoundsPlan[nextRound - 1];
+          setSHoldTime(next.hold); setSBreatheTime(next.breathe); setSRound(nextRound); setSPhase("breathe"); setSTimer(next.breathe);
         }
       }
     }, 1000);
     return () => clearTimeout(id);
-  }, [screen, sRunning, sTimer, sPhase, sHoldTime, sBreatheTime, sRound, sTable, sDifficulty, logHistory]);
+  }, [screen, sRunning, sTimer, sPhase, sHoldTime, sBreatheTime, sRound, sTable, sDifficulty, sRoundsPlan, logHistory]);
 
   const sPhaseTotal = sPhase === "hold" ? sHoldTime : sBreatheTime;
   const sFraction = sPhaseTotal > 0 ? 1 - sTimer / sPhaseTotal : 0;
@@ -622,6 +804,7 @@ export default function App() {
       <PhaseTint active={sessionTintActive} mode={sessionTintMode} />
       <Bubbles />
       <Toast message={toast} />
+      <MiniBurstLayer />
       <div key={screen} style={{ position: "relative", zIndex: 1, minHeight: "100vh", display: "flex", flexDirection: "column", paddingBottom: ["train", "pr", "history", "settings"].includes(screen) ? 90 : 0, animation: "fadeIn 0.25s ease-out" }}>
 
         {screen === "train" && (
@@ -637,7 +820,7 @@ export default function App() {
                 <TableCard key={t.id} table={t} onPlay={() => setPendingTable(t)}
                   onDelete={customTables.find((c) => c.id === t.id) ? () => setDeleteTarget({ kind: "custom", id: t.id }) : null} />
               ))}
-              <button onClick={() => setShowCustomModal(true)} style={{ ...primaryBtnStyle, marginTop: 8, background: "rgba(255,255,255,0.05)", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+              <button onClick={(e) => { const { x, y } = getEventXY(e); fireMiniBurst(x, y); setShowCustomModal(true); }} style={{ ...primaryBtnStyle, marginTop: 8, background: "rgba(255,255,255,0.05)", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
                 <Plus size={17} /> New custom table
               </button>
             </div>
@@ -647,18 +830,23 @@ export default function App() {
         {screen === "pr" && (
           <>
             <ScreenHeader title="Personal Best" />
-            <div style={{ padding: "20px 20px", textAlign: "center" }}>
-              <div style={{ fontSize: 66, fontWeight: 700, color: COLORS.white, fontFamily: DISPLAY_FONT, fontVariantNumeric: "tabular-nums" }}>{formatTime(prDraft)}</div>
-              <div style={{ display: "flex", justifyContent: "center", gap: 16, marginTop: 22 }}>
-                <button onClick={() => setPrDraft((v) => Math.max(5, v - 30))} style={circleBtnStyleBig}>&#8722;30</button>
-                <button onClick={() => setPrDraft((v) => Math.max(5, v - 5))} style={circleBtnStyleBig}>&#8722;5</button>
-                <button onClick={() => setPrDraft((v) => v + 5)} style={circleBtnStyleBig}>&#43;5</button>
-                <button onClick={() => setPrDraft((v) => v + 30)} style={circleBtnStyleBig}>&#43;30</button>
-              </div>
-              <button onClick={() => { setPrSeconds(prDraft); showToast(`PR saved: ${formatTime(prDraft)}`); }} style={{ ...primaryBtnStyle, marginTop: 26, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
-                <Check size={17} /> Save as PR
+            <div style={{ padding: "10px 20px", textAlign: "center" }}>
+              <Star size={30} fill={COLORS.orange} color={COLORS.orange} style={{ marginBottom: 8 }} />
+              <div style={{ fontSize: 60, fontWeight: 700, color: COLORS.white, fontFamily: DISPLAY_FONT, fontVariantNumeric: "tabular-nums" }}>{prSeconds > 0 ? formatTime(prSeconds) : "--:--"}</div>
+              <button onClick={() => setShowPrEdit(true)} style={{ ...pillBtnStyle, marginTop: 14, display: "inline-flex", alignItems: "center", gap: 6 }}>
+                <Pencil size={13} /> Edit
               </button>
-              <button onClick={startPrAttempt} style={{ ...primaryBtnStyle, marginTop: 14, background: "rgba(127,232,168,0.15)", borderColor: "rgba(127,232,168,0.4)", color: COLORS.greenBright }}>Start PR attempt</button>
+
+              {prAttemptStats.count > 0 && (
+                <div style={{ color: COLORS.dim, fontSize: 13, marginTop: 18 }}>
+                  {prAttemptStats.count} attempt{prAttemptStats.count !== 1 ? "s" : ""} logged
+                  {prAttemptStats.last && ` \u00B7 last: ${formatTime(prAttemptStats.last.duration)}`}
+                </div>
+              )}
+
+              <button onClick={(e) => { const { x, y } = getEventXY(e); fireMiniBurst(x, y); startPrAttempt(); }} style={{ ...primaryBtnStyle, marginTop: 26, background: "rgba(127,232,168,0.18)", borderColor: "rgba(127,232,168,0.45)", color: COLORS.greenBright, fontSize: 17, padding: "20px 0" }}>
+                Start PR attempt
+              </button>
             </div>
           </>
         )}
@@ -721,7 +909,7 @@ export default function App() {
               <button onClick={() => setShowExitConfirm(true)} style={{ background: "none", border: "none", color: COLORS.dim, cursor: "pointer" }}><X size={24} /></button>
               <div style={{ textAlign: "center" }}>
                 <div style={{ color: COLORS.dim, fontSize: 12.5 }}>{sTable.name}</div>
-                <div style={{ color: COLORS.cyan, fontWeight: 700, fontFamily: DISPLAY_FONT, letterSpacing: 2, fontSize: 15 }}>{sPhase === "done" ? "COMPLETE" : `ROUND ${sRound}/${sTable.rounds}`}</div>
+                <div style={{ color: COLORS.cyan, fontWeight: 700, fontFamily: DISPLAY_FONT, letterSpacing: 2, fontSize: 15 }}>{sPhase === "done" ? "COMPLETE" : `ROUND ${sRound}/${sRoundsPlan.length}`}</div>
               </div>
               <div style={{ width: 24 }} />
             </div>
@@ -750,19 +938,17 @@ export default function App() {
               </div>
 
               {sPhase === "ready" && !sRunning && (
-                <button onClick={(e) => { e.stopPropagation(); setSRunning(true); setSPhase("breathe"); }} style={{ ...primaryBtnStyle, marginTop: 30, maxWidth: 280 }}>Start</button>
+                <button onClick={(e) => { e.stopPropagation(); const { x, y } = getEventXY(e); fireMiniBurst(x, y); setSRunning(true); setSPhase("breathe"); }} style={{ ...primaryBtnStyle, marginTop: 30, maxWidth: 280 }}>Start</button>
               )}
               {(sPhase === "breathe" || sPhase === "ready") && sRunning && (
-                <div style={{ color: COLORS.dim, fontSize: 12, marginTop: 16, letterSpacing: 1, textAlign: "center" }}>DOUBLE-TAP ANYWHERE TO SKIP TO HOLD</div>
+                <div style={{ color: COLORS.dim, fontSize: 12, marginTop: 16, letterSpacing: 1, textAlign: "center" }}>DOUBLE-TAP TO SKIP</div>
               )}
               {sPhase === "done" && (
                 <button onClick={(e) => { e.stopPropagation(); beginSession(sTable, sDifficulty); }} style={{ ...primaryBtnStyle, marginTop: 30, maxWidth: 280 }}>Restart</button>
               )}
               {sPhase === "hold" && (
                 <div style={{ textAlign: "center", marginTop: 20 }}>
-                  <div style={{
-                    width: 200, height: 3, borderRadius: 2, background: "rgba(127,216,255,0.15)", overflow: "hidden", margin: "0 auto 10px",
-                  }}>
+                  <div style={{ width: 200, height: 3, borderRadius: 2, background: "rgba(127,216,255,0.15)", overflow: "hidden", margin: "0 auto 10px" }}>
                     <div style={{ height: "100%", background: COLORS.cyanBright, transformOrigin: "left",
                       transform: `scaleX(${contractionLongPress.pressing ? 1 : 0})`,
                       transition: contractionLongPress.pressing ? "transform 900ms linear" : "transform 0.15s ease-out" }} />
@@ -813,7 +999,7 @@ export default function App() {
                   <div style={{ fontSize: 50, fontWeight: 700, color: COLORS.white, fontFamily: DISPLAY_FONT, fontVariantNumeric: "tabular-nums" }}>{formatTime(paMode === "breathe" ? paTimer : paElapsed)}</div>
                 </div>
               </div>
-              {paMode === "breathe" && <div style={{ color: COLORS.dim, fontSize: 12, marginTop: 16, letterSpacing: 1 }}>DOUBLE-TAP ANYWHERE TO SKIP TO HOLD</div>}
+              {paMode === "breathe" && <div style={{ color: COLORS.dim, fontSize: 12, marginTop: 16, letterSpacing: 1 }}>DOUBLE-TAP TO SKIP</div>}
               {paMode === "attempt" && (
                 <div style={{ textAlign: "center", marginTop: 20 }}>
                   <div style={{ width: 200, height: 3, borderRadius: 2, background: "rgba(127,216,255,0.15)", overflow: "hidden", margin: "0 auto 10px" }}>
@@ -851,34 +1037,8 @@ export default function App() {
       )}
 
       {pendingTable && <DifficultyPicker onPick={(diff) => beginSession(pendingTable, diff)} onCancel={() => setPendingTable(null)} />}
-
-      {showCustomModal && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(3,15,24,0.9)", zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
-          <div style={{ ...glass, background: "rgba(10,31,46,0.9)", borderRadius: 18, padding: 22, width: "100%", maxWidth: 360, border: "1px solid rgba(127,216,255,0.2)" }}>
-            <div style={{ color: COLORS.white, fontWeight: 700, fontSize: 17, fontFamily: DISPLAY_FONT, marginBottom: 14, textAlign: "center", letterSpacing: 1 }}>NEW CUSTOM TABLE</div>
-            <input value={ctName} onChange={(e) => setCtName(e.target.value)} placeholder="Table name" style={{
-              width: "100%", padding: "12px 14px", borderRadius: 12, border: "1px solid rgba(127,216,255,0.3)",
-              background: "rgba(255,255,255,0.04)", color: COLORS.white, fontSize: 15, marginBottom: 12, fontFamily: BODY_FONT,
-            }} />
-            <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
-              {["O2", "CO2"].map((tt) => (
-                <button key={tt} onClick={() => setCtType(tt)} style={{
-                  flex: 1, padding: "12px 0", borderRadius: 12, fontWeight: 700, fontSize: 14, cursor: "pointer", fontFamily: DISPLAY_FONT,
-                  border: ctType === tt ? `1px solid ${COLORS.cyan}` : "1px solid rgba(127,216,255,0.15)",
-                  background: ctType === tt ? "rgba(127,216,255,0.15)" : "transparent", color: ctType === tt ? COLORS.cyanBright : COLORS.dim,
-                }}>{tt}</button>
-              ))}
-            </div>
-            <Stepper label="Rounds" value={ctRounds} onDec={() => setCtRounds((v) => Math.max(1, v - 1))} onInc={() => setCtRounds((v) => v + 1)} />
-            <Stepper label="Breathe (s)" value={ctBreathe} onDec={() => setCtBreathe((v) => Math.max(15, v - 5))} onInc={() => setCtBreathe((v) => v + 5)} />
-            <Stepper label="Hold (s)" value={ctHold} onDec={() => setCtHold((v) => Math.max(15, v - 5))} onInc={() => setCtHold((v) => v + 5)} />
-            <div style={{ display: "flex", gap: 10, marginTop: 6 }}>
-              <button onClick={() => setShowCustomModal(false)} style={{ ...pillBtnStyle, flex: 1, textAlign: "center" }}>Cancel</button>
-              <button onClick={addCustomTable} style={{ ...pillBtnStyle, flex: 1, textAlign: "center", background: "rgba(127,216,255,0.2)" }}>Add</button>
-            </div>
-          </div>
-        </div>
-      )}
+      {showCustomModal && <CustomTableModal prSeconds={prSeconds} onAdd={addCustomTable} onCancel={() => setShowCustomModal(false)} />}
+      {showPrEdit && <PrEditSheet initial={prSeconds || 60} onSave={(v) => { setPrSeconds(v); setShowPrEdit(false); showToast(`PR saved: ${formatTime(v)}`); }} onCancel={() => setShowPrEdit(false)} />}
 
       {showSurfaceConfirm && <ConfirmModal title="Surface now?" body="This will end the session and log it as failed, noting the round you surfaced on." confirmLabel="I surfaced" danger onConfirm={confirmSurface} onCancel={() => setShowSurfaceConfirm(false)} />}
       {showExitConfirm && <ConfirmModal title="Exit session?" body="Your progress on this session won't be saved." confirmLabel="Exit" danger onConfirm={() => { setShowExitConfirm(false); setSRunning(false); setScreen("train"); }} onCancel={() => setShowExitConfirm(false)} />}
