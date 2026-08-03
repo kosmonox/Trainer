@@ -25,6 +25,14 @@ export async function testVibrate() {
   }
 }
 
+// A single tick used for a real per-second countdown in the last few seconds
+// before a phase change. Duration escalates slightly as secondsLeft approaches
+// 1, so it builds a bit of tension rather than feeling uniform/flat.
+export async function countdownTick(secondsLeft) {
+  const duration = 25 + (5 - secondsLeft) * 10;
+  await pulse(Math.max(25, duration));
+}
+
 export async function warningPulse() {
   await pulse(45);
   await new Promise((r) => setTimeout(r, 160));
