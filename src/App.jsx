@@ -8,6 +8,7 @@ import {
 import { loadStored, saveStored } from "./storage.js";
 import { scanAndConnectHrMonitor, disconnectHrMonitor } from "./ble.js";
 import { warningPulse, transitionPulse, minutePulse, prBeatPulse, setHapticsEnabled, testVibrate } from "./haptics.js";
+import { Share } from "@capacitor/share";
 
 const COLORS = {
   bg: "#030f18",
@@ -308,7 +309,7 @@ function ScreenHeader({ title }) {
   </div>;
 }
 
-function TableCard({ table, onPlay, onDelete }) {
+function TableCard({ table, onPlay, onEdit, onDelete }) {
   const { rounds, totalSeconds, maxHold } = tableStats(table);
   const maxVal = Math.max(...rounds.map((r) => r.hold));
   const isO2 = table.tableType === "O2";
@@ -319,7 +320,10 @@ function TableCard({ table, onPlay, onDelete }) {
         <span style={{ display: "inline-block", padding: "5px 11px", borderRadius: 8, fontSize: 12, fontWeight: 700, letterSpacing: 1, color: badgeColor, background: `${badgeColor}22`, fontFamily: DISPLAY_FONT }}>
           {table.tableType} TABLE {table.advanced && "\u00B7 ADV"}
         </span>
-        {onDelete && <span onClick={onDelete} style={{ color: COLORS.red, cursor: "pointer", padding: 4 }}><Trash2 size={17} /></span>}
+        <div style={{ display: "flex", gap: 4 }}>
+          {onEdit && <span onClick={onEdit} style={{ color: COLORS.cyan, cursor: "pointer", padding: 4 }}><Pencil size={16} /></span>}
+          {onDelete && <span onClick={onDelete} style={{ color: COLORS.red, cursor: "pointer", padding: 4 }}><Trash2 size={17} /></span>}
+        </div>
       </div>
       <div style={{ color: COLORS.white, fontWeight: 700, fontSize: 22, fontFamily: DISPLAY_FONT, marginTop: 10, marginBottom: 8 }}>{table.name}</div>
       <div style={{ display: "flex", gap: 18, color: COLORS.dim, fontSize: 13.5, marginBottom: 18, flexWrap: "wrap" }}>
@@ -382,7 +386,7 @@ function ConfirmModal({ title, body, confirmLabel, danger, onConfirm, onCancel }
   );
 }
 
-function DifficultyPicker({ onPick, onCancel }) {
+function DifficultyPicker({ defaultDifficulty, onPick, onCancel }) {
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(3,15,24,0.85)", zIndex: 50, display: "flex", alignItems: "flex-end" }}>
       <div style={{ ...glass, background: "rgba(10,31,46,0.9)", borderRadius: "20px 20px 0 0", padding: 22, width: "100%", border: "1px solid rgba(127,216,255,0.2)" }}>
@@ -390,9 +394,14 @@ function DifficultyPicker({ onPick, onCancel }) {
         {Object.entries(DIFFICULTIES).map(([key, d]) => (
           <button key={key} onClick={(e) => { const { x, y } = getEventXY(e); fireMiniBurst(x, y); onPick(key); }} style={{
             width: "100%", textAlign: "left", background: "rgba(255,255,255,0.03)", border: `1px solid ${d.color}55`,
-            borderRadius: 14, padding: "14px 16px", marginBottom: 10, cursor: "pointer",
+            borderRadius: 14, padding: "14px 16px", marginBottom: 10, cursor: "pointer", position: "relative",
           }}>
-            <div style={{ color: d.color, fontWeight: 700, fontSize: 16, fontFamily: DISPLAY_FONT }}>{d.emoji} {d.label}</div>
+            <div style={{ color: d.color, fontWeight: 700, fontSize: 16, fontFamily: DISPLAY_FONT, display: "flex", alignItems: "center", gap: 8 }}>
+              {d.emoji} {d.label}
+              {defaultDifficulty === key && (
+                <span style={{ fontSize: 10, color: COLORS.dim, fontWeight: 600, letterSpacing: 0.5, border: "1px solid rgba(255,255,255,0.2)", borderRadius: 6, padding: "2px 6px" }}>PAR DÉFAUT</span>
+              )}
+            </div>
             <div style={{ color: COLORS.dim, fontSize: 12, marginTop: 2 }}>
               {key === "normal" ? "Standard table as designed" : `${d.breatheMul > 1 ? "+" : ""}${Math.round((d.breatheMul - 1) * 100)}% breathe time, ${d.holdMul > 1 ? "+" : ""}${Math.round((d.holdMul - 1) * 100)}% holds`}
             </div>
@@ -535,15 +544,15 @@ function useLongPress(callback, ms = 900) {
 // Custom table creation modal - simple mode (with optional PR-based prefill and
 // an editable increment) or advanced mode (explicit per-round editing).
 // ---------------------------------------------------------------------------
-function CustomTableModal({ prSeconds, onAdd, onCancel }) {
-  const [name, setName] = useState("");
-  const [type, setType] = useState("O2");
-  const [rounds, setRounds] = useState(8);
-  const [breathe, setBreathe] = useState(120);
-  const [hold, setHold] = useState(60);
-  const [step, setStep] = useState(15);
-  const [advanced, setAdvanced] = useState(false);
-  const [customRounds, setCustomRounds] = useState(null);
+function CustomTableModal({ prSeconds, initial, onAdd, onCancel }) {
+  const [name, setName] = useState(initial ? initial.name : "");
+  const [type, setType] = useState(initial ? initial.tableType : "O2");
+  const [rounds, setRounds] = useState(initial && !initial.advanced ? initial.rounds : 8);
+  const [breathe, setBreathe] = useState(initial && !initial.advanced ? initial.baseBreathe : 120);
+  const [hold, setHold] = useState(initial && !initial.advanced ? initial.baseHold : 60);
+  const [step, setStep] = useState(initial && !initial.advanced ? initial.step : 15);
+  const [advanced, setAdvanced] = useState(initial ? !!initial.advanced : false);
+  const [customRounds, setCustomRounds] = useState(initial && initial.advanced ? initial.customRounds : null);
 
   const applyPrBase = () => {
     if (prSeconds <= 0) return;
@@ -564,10 +573,11 @@ function CustomTableModal({ prSeconds, onAdd, onCancel }) {
   const updateRound = (i, field, delta) => setCustomRounds((r) => r.map((rd, idx) => idx === i ? { ...rd, [field]: Math.max(5, rd[field] + delta) } : rd));
 
   const handleAdd = () => {
+    const id = initial ? initial.id : uid();
     if (advanced) {
-      onAdd({ id: uid(), name: name.trim() || "Custom table", tableType: type, advanced: true, customRounds });
+      onAdd({ id, name: name.trim() || "Custom table", tableType: type, advanced: true, customRounds });
     } else {
-      onAdd({ id: uid(), name: name.trim() || "Custom table", tableType: type, baseHold: hold, baseBreathe: breathe, step, rounds });
+      onAdd({ id, name: name.trim() || "Custom table", tableType: type, baseHold: hold, baseBreathe: breathe, step, rounds });
     }
   };
 
@@ -575,7 +585,7 @@ function CustomTableModal({ prSeconds, onAdd, onCancel }) {
     <div style={{ position: "fixed", inset: 0, background: "rgba(3,15,24,0.92)", zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", padding: 20, overflowY: "auto" }}>
       <div style={{ ...glass, background: "rgba(10,31,46,0.92)", borderRadius: 18, padding: 22, width: "100%", maxWidth: 380, border: "1px solid rgba(127,216,255,0.2)", maxHeight: "88vh", overflowY: "auto" }}>
         <div style={{ color: COLORS.white, fontWeight: 700, fontSize: 17, fontFamily: DISPLAY_FONT, marginBottom: 14, textAlign: "center", letterSpacing: 1 }}>
-          {advanced ? "CUSTOMIZE ROUNDS" : "NEW CUSTOM TABLE"}
+          {advanced ? "CUSTOMIZE ROUNDS" : initial ? "MODIFIER LA TABLE" : "NEW CUSTOM TABLE"}
         </div>
 
         {!advanced && (
@@ -723,29 +733,31 @@ function PhaseAccordion({ phase, expanded, onToggle, statuses, notes, onSetStatu
   );
 }
 
-function DiveLogForm({ onSave, onCancel }) {
-  const [date, setDate] = useState(todayKey());
-  const [location, setLocation] = useState("");
-  const [depth, setDepth] = useState("");
-  const [statuses, setStatuses] = useState({});
-  const [notes, setNotes] = useState({});
+function DiveLogForm({ initial, depthUnit, onSave, onCancel }) {
+  const [date, setDate] = useState(initial ? initial.date : todayKey());
+  const [location, setLocation] = useState(initial ? initial.location || "" : "");
+  const [depth, setDepth] = useState(initial && initial.depth != null ? String(initial.depth) : "");
+  const [statuses, setStatuses] = useState(initial ? initial.statuses : {});
+  const [notes, setNotes] = useState(initial ? initial.notes : {});
   const [expandedPhase, setExpandedPhase] = useState("p1");
-  const [objective, setObjective] = useState("");
-  const [blocker, setBlocker] = useState("");
-  const [gear, setGear] = useState("");
+  const [objective, setObjective] = useState(initial ? initial.objective || "" : "");
+  const [blocker, setBlocker] = useState(initial ? initial.blocker || "" : "");
+  const [gear, setGear] = useState(initial ? initial.gear || "" : "");
 
   const setItemStatus = (itemId, status) => setStatuses((s) => ({ ...s, [itemId]: status }));
   const updateNote = (itemId, value) => setNotes((n) => ({ ...n, [itemId]: value }));
 
   const handleSave = () => {
-    onSave({ id: uid(), date, location: location.trim(), depth: depth ? Number(depth) : null, statuses, notes, objective: objective.trim(), blocker: blocker.trim(), gear: gear.trim(), timestamp: Date.now() });
+    const id = initial ? initial.id : uid();
+    const timestamp = initial ? initial.timestamp : Date.now();
+    onSave({ id, date, location: location.trim(), depth: depth ? Number(depth) : null, statuses, notes, objective: objective.trim(), blocker: blocker.trim(), gear: gear.trim(), timestamp });
   };
 
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "22px 22px 4px" }}>
         <button onClick={onCancel} style={{ background: "none", border: "none", color: COLORS.dim, cursor: "pointer" }}><X size={24} /></button>
-        <div style={{ color: COLORS.cyan, fontWeight: 700, fontFamily: DISPLAY_FONT, letterSpacing: 2, fontSize: 15 }}>LOGGER UNE PLONGÉE</div>
+        <div style={{ color: COLORS.cyan, fontWeight: 700, fontFamily: DISPLAY_FONT, letterSpacing: 2, fontSize: 15 }}>{initial ? "MODIFIER LA PLONG\u00C9E" : "LOGGER UNE PLONG\u00C9E"}</div>
         <div style={{ width: 24 }} />
       </div>
       <div style={{ padding: "12px 20px 100px", overflowY: "auto" }}>
@@ -764,7 +776,7 @@ function DiveLogForm({ onSave, onCancel }) {
               }} />
             </div>
             <div style={{ width: 100 }}>
-              <div style={{ color: COLORS.dim, fontSize: 11, letterSpacing: 1, marginBottom: 6 }}>PROF. (M)</div>
+              <div style={{ color: COLORS.dim, fontSize: 11, letterSpacing: 1, marginBottom: 6 }}>PROF. ({(depthUnit || "m").toUpperCase()})</div>
               <input value={depth} onChange={(e) => setDepth(e.target.value.replace(/[^0-9]/g, ""))} placeholder="0" inputMode="numeric" style={{
                 width: "100%", padding: "10px 12px", borderRadius: 10, border: "1px solid rgba(127,216,255,0.3)",
                 background: "rgba(255,255,255,0.04)", color: COLORS.white, fontSize: 14, fontFamily: BODY_FONT,
@@ -868,6 +880,8 @@ export default function App() {
   const [diveLog, setDiveLog] = useState([]);
   const [hapticsOn, setHapticsOn] = useState(true);
   const [prBreatheSeconds, setPrBreatheSeconds] = useState(120);
+  const [depthUnit, setDepthUnit] = useState("m");
+  const [defaultDifficulty, setDefaultDifficulty] = useState("normal");
   const [selectedDate, setSelectedDate] = useState(null);
   const [showPrEdit, setShowPrEdit] = useState(false);
 
@@ -885,6 +899,8 @@ export default function App() {
       setHapticsOn(settings.haptics !== false);
       setHapticsEnabled(settings.haptics !== false);
       setPrBreatheSeconds(settings.prBreatheSeconds || 120);
+      setDepthUnit(settings.depthUnit || "m");
+      setDefaultDifficulty(settings.defaultDifficulty || "normal");
       setLoaded(true);
     })();
   }, []);
@@ -892,7 +908,7 @@ export default function App() {
   useEffect(() => { if (loaded) saveStored("apnea_custom_tables", customTables); }, [customTables, loaded]);
   useEffect(() => { if (loaded) saveStored("apnea_history", history); }, [history, loaded]);
   useEffect(() => { if (loaded) saveStored("apnea_dive_log", diveLog); }, [diveLog, loaded]);
-  useEffect(() => { if (loaded) { saveStored("apnea_settings", { haptics: hapticsOn, prBreatheSeconds }); setHapticsEnabled(hapticsOn); } }, [hapticsOn, prBreatheSeconds, loaded]);
+  useEffect(() => { if (loaded) { saveStored("apnea_settings", { haptics: hapticsOn, prBreatheSeconds, depthUnit, defaultDifficulty }); setHapticsEnabled(hapticsOn); } }, [hapticsOn, prBreatheSeconds, depthUnit, defaultDifficulty, loaded]);
 
   const logHistory = useCallback((entry) => setHistory((h) => [{ id: uid(), date: todayKey(), timestamp: Date.now(), ...entry }, ...h]), []);
   const deleteHistoryEntry = useCallback((id) => setHistory((h) => h.filter((e) => e.id !== id)), []);
@@ -923,22 +939,48 @@ export default function App() {
   const disconnectWatch = async () => { await disconnectHrMonitor(); setBleConnected(false); setBleStatus("Disconnected"); };
 
   const [showCustomModal, setShowCustomModal] = useState(false);
+  const [editingTable, setEditingTable] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [confirmClearHistory, setConfirmClearHistory] = useState(false);
   const [confirmResetPr, setConfirmResetPr] = useState(false);
 
-  const addCustomTable = (t) => {
-    setCustomTables((c) => [...c, t]);
+  const saveCustomTable = (t) => {
+    setCustomTables((c) => {
+      const exists = c.some((x) => x.id === t.id);
+      return exists ? c.map((x) => (x.id === t.id ? t : x)) : [...c, t];
+    });
     setShowCustomModal(false);
-    showToast("Custom table added");
+    setEditingTable(null);
+    showToast(editingTable ? "Table modifi\u00E9e" : "Custom table added");
   };
 
+  const [editingDiveId, setEditingDiveId] = useState(null);
   const saveDiveEntry = (entry) => {
-    setDiveLog((d) => [entry, ...d]);
+    setDiveLog((d) => {
+      const exists = d.some((x) => x.id === entry.id);
+      return exists ? d.map((x) => (x.id === entry.id ? entry : x)) : [entry, ...d];
+    });
+    setEditingDiveId(null);
     setScreen("diving");
-    showToast("Plong\u00E9e enregistr\u00E9e");
+    showToast(editingDiveId ? "Plong\u00E9e modifi\u00E9e" : "Plong\u00E9e enregistr\u00E9e");
   };
   const deleteDiveEntry = (id) => setDiveLog((d) => d.filter((e) => e.id !== id));
+
+  const exportData = async () => {
+    const payload = {
+      exportedAt: new Date().toISOString(),
+      pr: prSeconds,
+      customTables,
+      history,
+      diveLog,
+      settings: { haptics: hapticsOn, prBreatheSeconds, depthUnit, defaultDifficulty },
+    };
+    try {
+      await Share.share({ title: "Apnea Trainer - sauvegarde", text: JSON.stringify(payload, null, 2) });
+    } catch (e) {
+      showToast("Export annul\u00E9 ou indisponible");
+    }
+  };
 
   const [pendingTable, setPendingTable] = useState(null);
   const tpList = () => [autoTable("O2", prSeconds), autoTable("CO2", prSeconds), ...customTables];
@@ -1083,6 +1125,7 @@ export default function App() {
             <div style={{ padding: "0 20px" }}>
               {tpList().map((t) => (
                 <TableCard key={t.id} table={t} onPlay={() => setPendingTable(t)}
+                  onEdit={customTables.find((c) => c.id === t.id) ? () => { setEditingTable(t); setShowCustomModal(true); } : null}
                   onDelete={customTables.find((c) => c.id === t.id) ? () => setDeleteTarget({ kind: "custom", id: t.id }) : null} />
               ))}
               <button onClick={(e) => { const { x, y } = getEventXY(e); fireMiniBurst(x, y); setShowCustomModal(true); }} style={{ ...primaryBtnStyle, marginTop: 8, background: "rgba(255,255,255,0.05)", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
@@ -1168,17 +1211,17 @@ export default function App() {
                 const work = countWork(entry);
                 const dotColor = work === 0 ? COLORS.green : work <= 2 ? COLORS.orange : COLORS.red;
                 return (
-                  <div key={entry.id} style={{ ...glass, background: COLORS.bgCard, borderRadius: 14, padding: "14px 16px", marginBottom: 8, display: "flex", alignItems: "center", justifyContent: "space-between", border: "1px solid rgba(127,216,255,0.1)" }}>
+                  <div key={entry.id} onClick={() => { setEditingDiveId(entry.id); setScreen("divelogform"); }} style={{ ...glass, background: COLORS.bgCard, borderRadius: 14, padding: "14px 16px", marginBottom: 8, display: "flex", alignItems: "center", justifyContent: "space-between", border: "1px solid rgba(127,216,255,0.1)", cursor: "pointer" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                       <div style={{ width: 9, height: 9, borderRadius: "50%", background: dotColor, flexShrink: 0 }} />
                       <div>
                         <div style={{ color: COLORS.white, fontWeight: 600, fontSize: 14 }}>{entry.date}{entry.location && ` \u00B7 ${entry.location}`}</div>
                         <div style={{ color: COLORS.dim, fontSize: 11.5, marginTop: 2 }}>
-                          {entry.depth ? `${entry.depth}m \u00B7 ` : ""}{work} à travailler
+                          {entry.depth ? `${entry.depth}${depthUnit} \u00B7 ` : ""}{work} \u00E0 travailler
                         </div>
                       </div>
                     </div>
-                    <span onClick={() => setDeleteTarget({ kind: "dive", id: entry.id })} style={{ color: COLORS.red, cursor: "pointer", padding: 6 }}><Trash2 size={16} /></span>
+                    <span onClick={(e) => { e.stopPropagation(); setDeleteTarget({ kind: "dive", id: entry.id }); }} style={{ color: COLORS.red, cursor: "pointer", padding: 6 }}><Trash2 size={16} /></span>
                   </div>
                 );
               })}
@@ -1187,7 +1230,7 @@ export default function App() {
         )}
 
         {screen === "divelogform" && (
-          <DiveLogForm onSave={saveDiveEntry} onCancel={() => setScreen("diving")} />
+          <DiveLogForm initial={diveLog.find((e) => e.id === editingDiveId) || null} depthUnit={depthUnit} onSave={saveDiveEntry} onCancel={() => { setEditingDiveId(null); setScreen("diving"); }} />
         )}
 
         {screen === "settings" && (
@@ -1196,6 +1239,36 @@ export default function App() {
             <div style={{ padding: "0 20px" }}>
               <ToggleRow label="Haptics" sub="Vibration cues during sessions" checked={hapticsOn} onChange={setHapticsOn} />
               <Stepper label="PR breathe-up (s)" value={prBreatheSeconds} onDec={() => setPrBreatheSeconds((v) => Math.max(15, v - 10))} onInc={() => setPrBreatheSeconds((v) => v + 10)} />
+
+              <div style={{ ...glass, background: COLORS.bgCard, borderRadius: 16, padding: "16px 18px", marginBottom: 12, border: "1px solid rgba(127,216,255,0.12)" }}>
+                <div style={{ color: COLORS.white, fontWeight: 600, fontSize: 15, marginBottom: 10 }}>Unité de profondeur</div>
+                <div style={{ display: "flex", gap: 10 }}>
+                  {["m", "ft"].map((u) => (
+                    <button key={u} onClick={() => setDepthUnit(u)} style={{
+                      flex: 1, padding: "10px 0", borderRadius: 10, fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: DISPLAY_FONT,
+                      border: depthUnit === u ? `1px solid ${COLORS.cyan}` : "1px solid rgba(127,216,255,0.15)",
+                      background: depthUnit === u ? "rgba(127,216,255,0.15)" : "transparent", color: depthUnit === u ? COLORS.cyanBright : COLORS.dim,
+                    }}>{u.toUpperCase()}</button>
+                  ))}
+                </div>
+              </div>
+
+              <div style={{ ...glass, background: COLORS.bgCard, borderRadius: 16, padding: "16px 18px", marginBottom: 12, border: "1px solid rgba(127,216,255,0.12)" }}>
+                <div style={{ color: COLORS.white, fontWeight: 600, fontSize: 15, marginBottom: 10 }}>Difficulté par défaut</div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  {Object.entries(DIFFICULTIES).map(([key, d]) => (
+                    <button key={key} onClick={() => setDefaultDifficulty(key)} style={{
+                      flex: 1, padding: "10px 4px", borderRadius: 10, fontWeight: 700, fontSize: 12, cursor: "pointer", fontFamily: DISPLAY_FONT,
+                      border: defaultDifficulty === key ? `1px solid ${d.color}` : "1px solid rgba(127,216,255,0.15)",
+                      background: defaultDifficulty === key ? `${d.color}25` : "transparent", color: defaultDifficulty === key ? d.color : COLORS.dim,
+                    }}>{d.emoji} {d.label}</button>
+                  ))}
+                </div>
+              </div>
+
+              <button onClick={exportData} style={{ ...primaryBtnStyle, marginBottom: 12, background: "rgba(127,216,255,0.12)", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+                <Check size={16} /> Exporter mes données
+              </button>
               <div style={{ height: 4 }} />
               <button onClick={() => setConfirmResetPr(true)} style={{ ...primaryBtnStyle, marginBottom: 12, background: "rgba(255,255,255,0.05)", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
                 <RotateCcw size={16} /> Reset personal best
@@ -1344,8 +1417,8 @@ export default function App() {
         </div>
       )}
 
-      {pendingTable && <DifficultyPicker onPick={(diff) => beginSession(pendingTable, diff)} onCancel={() => setPendingTable(null)} />}
-      {showCustomModal && <CustomTableModal prSeconds={prSeconds} onAdd={addCustomTable} onCancel={() => setShowCustomModal(false)} />}
+      {pendingTable && <DifficultyPicker defaultDifficulty={defaultDifficulty} onPick={(diff) => beginSession(pendingTable, diff)} onCancel={() => setPendingTable(null)} />}
+      {showCustomModal && <CustomTableModal prSeconds={prSeconds} initial={editingTable} onAdd={saveCustomTable} onCancel={() => { setShowCustomModal(false); setEditingTable(null); }} />}
       {showPrEdit && <PrEditSheet initial={prSeconds || 60} onSave={(v) => { setPrSeconds(v); setShowPrEdit(false); showToast(`PR saved: ${formatTime(v)}`); }} onCancel={() => setShowPrEdit(false)} />}
 
       {showSurfaceConfirm && <ConfirmModal title="Surface now?" body="This will end the session and log it as failed, noting the round you surfaced on." confirmLabel="I surfaced" danger onConfirm={confirmSurface} onCancel={() => setShowSurfaceConfirm(false)} />}
