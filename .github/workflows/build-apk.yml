@@ -40,6 +40,12 @@ jobs:
       - name: Sync Capacitor
         run: npx cap sync android
 
+      - name: Apply custom app icon
+        run: |
+          for density in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
+            cp icons/mipmap-$density/*.png android/app/src/main/res/mipmap-$density/
+          done
+
       - name: Make gradlew executable
         run: chmod +x android/gradlew
 
