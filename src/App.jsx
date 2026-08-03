@@ -3,6 +3,7 @@ import {
   Heart, Play, Trash2, X, Zap, AlertTriangle, Plus, Minus,
   Bluetooth, Dumbbell, Timer, BarChart3, Settings2, Star,
   Clock, Layers, TrendingUp, RotateCcw, Check, Pencil, ListPlus,
+  Waves, ChevronDown, ChevronUp,
 } from "lucide-react";
 import { loadStored, saveStored } from "./storage.js";
 import { scanAndConnectHrMonitor, disconnectHrMonitor } from "./ble.js";
@@ -31,6 +32,65 @@ const DIFFICULTIES = {
   normal: { label: "Normal", emoji: "\u26A1", breatheMul: 1, holdMul: 1, color: COLORS.cyan },
   hard: { label: "Hard", emoji: "\u{1F525}", breatheMul: 0.75, holdMul: 1.30, color: COLORS.red },
 };
+
+// Checklist extracted from the user's dive-prep reference sheet. A few lines in the
+// source PDF were partially garbled by OCR - reconstructed to the clearest sensible
+// reading; worth double-checking against the original once visible in the app.
+const DIVE_PHASES = [
+  { id: "p1", title: "Phase 1 \u2014 \u00C0 sec & Pr\u00E9paration", items: [
+    { id: "p1_1", text: "\u00C9tirements thoraciques et diaphragmatiques : ma cage thoracique est-elle souple ? Ai-je fait mes exercices d'assouplissement aujourd'hui ?", influence: "Pelizzari" },
+    { id: "p1_2", text: "Pratique du Pranayama / Yoga : suis-je capable de contr\u00F4ler ma respiration pour abaisser mon rythme cardiaque \u00E0 sec ?", influence: "Pelizzari" },
+    { id: "p1_3", text: "Entra\u00EEnement de la compensation : est-ce que je pratique mon Frenzel sur le canap\u00E9 avec un ballon (Otovent) ?", influence: "Stern" },
+    { id: "p1_4", text: "Visualisation mentale : avant la session, ai-je visualis\u00E9 ma plong\u00E9e parfaite, fluide et relax\u00E9e, du d\u00E9but \u00E0 la fin ?", influence: "Pelizzari" },
+  ]},
+  { id: "p2", title: "Phase 2 \u2014 En Surface (Breathe-up)", items: [
+    { id: "p2_1", text: "Body Scan : j'ai scann\u00E9 mon corps. Mon front, mes m\u00E2choires, mon cou et mes \u00E9paules sont totalement rel\u00E2ch\u00E9s.", influence: "Stern" },
+    { id: "p2_2", text: "Respiration ventrale (2:1) : mon expiration est deux fois plus longue que mon inspiration. Seul mon ventre se gonfle sans forcer.", influence: "Stern, Pelizzari" },
+    { id: "p2_3", text: "D\u00E9concentration / Introspection : mon esprit n'est plus sur l'objectif, ni sur mes peurs. Je suis concentr\u00E9 sur le moment pr\u00E9sent.", influence: "Molchanov, Pelizzari" },
+    { id: "p2_4", text: "Derni\u00E8re inspiration maximale : en 3 temps (ventre, poitrine, clavicules) sans cr\u00E9er de tension extr\u00EAme au niveau du cou.", influence: "Pelizzari" },
+  ]},
+  { id: "p3", title: "Phase 3 \u2014 L'Immersion (Canard)", items: [
+    { id: "p3_1", text: "Fluidit\u00E9 et silence : mon canard a-t-il fait des \u00E9claboussures ? Il doit \u00EAtre silencieux et utiliser le poids du torse pour couler.", influence: "Stern, Pelizzari" },
+    { id: "p3_2", text: "Gainage imm\u00E9diat : d\u00E8s que mes palmes sont sous l'eau, mon corps est parfaitement align\u00E9 (streamline).", influence: "Molchanov" },
+    { id: "p3_3", text: "Premi\u00E8re compensation : ai-je compens\u00E9 avant m\u00EAme d'avoir mal, d\u00E8s le passage de la surface ?", influence: "Stern" },
+  ]},
+  { id: "p4", title: "Phase 4 \u2014 La Descente", items: [
+    { id: "p4_1", text: "Position de la t\u00EAte (Head Neutral) : mon menton est-il rentr\u00E9 ? Interdiction de regarder le fond pour ne pas cambrer la nuque.", influence: "Molchanov" },
+    { id: "p4_2", text: "Palmage efficace : mon mouvement part-il bien de la hanche avec des genoux souples, sans faire de mouvement de \u00AB v\u00E9lo \u00BB ?", influence: "Molchanov" },
+    { id: "p4_3", text: "Anticipation Frenzel : je compense fr\u00E9quemment et doucement. Ma langue fait le piston, mon ventre reste d\u00E9tendu.", influence: "Stern" },
+    { id: "p4_4", text: "Acceptation des spasmes : si le besoin de respirer appara\u00EEt, est-ce que je l'accueille avec calme et rel\u00E2chement plut\u00F4t que de lutter ?", influence: "Molchanov" },
+  ]},
+  { id: "p5", title: "Phase 5 \u2014 La Chute Libre (Freefall)", items: [
+    { id: "p5_1", text: "Arr\u00EAt de la propulsion : ai-je identifi\u00E9 ma zone de flottabilit\u00E9 n\u00E9gative pour cesser tout mouvement au bon moment ?", influence: "Stern, Molchanov" },
+    { id: "p5_2", text: "Rel\u00E2chement absolu : mes bras le long du corps, \u00E9paules tombantes. Je me laisse \u00AB couler \u00BB sans aucune r\u00E9sistance.", influence: "Pelizzari" },
+    { id: "p5_3", text: "Focus sur l'\u00E9galisation : la seule chose qui bouge est la glotte et la langue pour compenser. Le reste du corps dort.", influence: "Stern" },
+  ]},
+  { id: "p6", title: "Phase 6 \u2014 Le Virage et Remont\u00E9e", items: [
+    { id: "p6_1", text: "Virage fluide : mon virage a-t-il \u00E9t\u00E9 ample et \u00E9conome (sans mouvements brusques qui consomment de l'oxyg\u00E8ne) ?", influence: "Pelizzari" },
+    { id: "p6_2", text: "Palmage de remont\u00E9e : pos\u00E9, r\u00E9gulier. Je ne pr\u00E9cipite pas le rythme (pas de sprint final).", influence: "Molchanov" },
+    { id: "p6_3", text: "Regard droit : je ne regarde pas la surface, je regarde droit devant / le fil.", influence: "Molchanov" },
+    { id: "p6_4", text: "Flottabilit\u00E9 positive : dans les derniers m\u00E8tres (les plus faciles), j'arr\u00EAte de nager et je laisse la flottabilit\u00E9 m'amener.", influence: "Stern" },
+  ]},
+  { id: "p7", title: "Phase 7 \u2014 La Surface", items: [
+    { id: "p7_1", text: "Recovery Breathing (Respirations Crochet) : expiration l\u00E9g\u00E8re puis inspirations rapides et courtes (au moins 3 \u00E0 4).", influence: "Stern, Molchanov" },
+    { id: "p7_2", text: "Signe OK : je donne le signe visuel et vocal (\u00AB I'm okay \u00BB) avant de r\u00E9cup\u00E9rer ma vue / parler normalement.", influence: "Molchanov" },
+    { id: "p7_3", text: "Analyse \u00E0 froid : qu'est-ce qui m'a manqu\u00E9 ? (Contr\u00F4le / D\u00E9tente / Chrono ?)", influence: "Tous" },
+  ]},
+];
+
+function computeFocusSummary(entry) {
+  if (!entry) return null;
+  const workItems = [];
+  DIVE_PHASES.forEach((phase) => phase.items.forEach((item) => {
+    if (entry.statuses[item.id] === "work") workItems.push(item.text);
+  }));
+  return { objective: entry.objective, blocker: entry.blocker, gear: entry.gear, workItems };
+}
+function countWork(entry) {
+  let n = 0;
+  DIVE_PHASES.forEach((phase) => phase.items.forEach((item) => { if (entry.statuses[item.id] === "work") n++; }));
+  return n;
+}
 
 function formatTime(totalSeconds) {
   const s = Math.max(0, Math.round(totalSeconds));
@@ -602,6 +662,191 @@ function PrEditSheet({ initial, onSave, onCancel }) {
   );
 }
 
+const STATUS_CYCLE = ["none", "good", "work", "na"];
+const STATUS_META = {
+  none: { label: "Tap to set", color: COLORS.dim, bg: "rgba(255,255,255,0.04)" },
+  good: { label: "Bon", color: COLORS.green, bg: "rgba(127,232,168,0.15)" },
+  work: { label: "\u00C0 travailler", color: COLORS.orange, bg: "rgba(244,177,63,0.15)" },
+  na: { label: "N/A", color: COLORS.dim, bg: "rgba(255,255,255,0.06)" },
+};
+
+function DiveItemRow({ item, status, note, onCycle, onNoteChange }) {
+  const [showNote, setShowNote] = useState(!!note);
+  const meta = STATUS_META[status || "none"];
+  return (
+    <div style={{ background: COLORS.bgCardHi, borderRadius: 14, padding: "12px 14px", marginBottom: 8 }}>
+      <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+        <button onClick={onCycle} style={{
+          flexShrink: 0, marginTop: 1, minWidth: 84, padding: "6px 10px", borderRadius: 10, border: `1px solid ${meta.color}55`,
+          background: meta.bg, color: meta.color, fontSize: 11.5, fontWeight: 700, cursor: "pointer", fontFamily: DISPLAY_FONT, letterSpacing: 0.5,
+        }}>{meta.label}</button>
+        <div style={{ flex: 1 }}>
+          <div style={{ color: COLORS.white, fontSize: 13.5, lineHeight: 1.4 }}>{item.text}</div>
+          <div style={{ color: COLORS.dim, fontSize: 11, marginTop: 4, fontStyle: "italic" }}>{item.influence}</div>
+          {showNote ? (
+            <textarea value={note || ""} onChange={(e) => onNoteChange(e.target.value)} placeholder="Note personnelle..." rows={2} style={{
+              width: "100%", marginTop: 8, padding: "8px 10px", borderRadius: 8, border: "1px solid rgba(127,216,255,0.2)",
+              background: "rgba(255,255,255,0.03)", color: COLORS.white, fontSize: 12.5, fontFamily: BODY_FONT, resize: "vertical",
+            }} />
+          ) : (
+            <button onClick={() => setShowNote(true)} style={{ background: "none", border: "none", color: COLORS.cyan, fontSize: 11.5, marginTop: 6, cursor: "pointer", padding: 0 }}>+ ajouter une note</button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PhaseAccordion({ phase, expanded, onToggle, statuses, notes, onCycle, onNoteChange }) {
+  const doneCount = phase.items.filter((it) => statuses[it.id] && statuses[it.id] !== "none").length;
+  return (
+    <div style={{ ...glass, background: COLORS.bgCard, borderRadius: 16, marginBottom: 12, border: "1px solid rgba(127,216,255,0.12)", overflow: "hidden" }}>
+      <button onClick={onToggle} style={{ width: "100%", padding: "16px 18px", background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ color: COLORS.white, fontWeight: 700, fontSize: 14.5, fontFamily: DISPLAY_FONT, textAlign: "left" }}>{phase.title}</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ color: COLORS.dim, fontSize: 11.5 }}>{doneCount}/{phase.items.length}</span>
+          {expanded ? <ChevronUp size={16} color={COLORS.dim} /> : <ChevronDown size={16} color={COLORS.dim} />}
+        </div>
+      </button>
+      {expanded && (
+        <div style={{ padding: "0 14px 14px" }}>
+          {phase.items.map((item) => (
+            <DiveItemRow key={item.id} item={item} status={statuses[item.id]} note={notes[item.id]}
+              onCycle={() => onCycle(item.id)} onNoteChange={(v) => onNoteChange(item.id, v)} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DiveLogForm({ onSave, onCancel }) {
+  const [date, setDate] = useState(todayKey());
+  const [location, setLocation] = useState("");
+  const [depth, setDepth] = useState("");
+  const [statuses, setStatuses] = useState({});
+  const [notes, setNotes] = useState({});
+  const [expandedPhase, setExpandedPhase] = useState("p1");
+  const [objective, setObjective] = useState("");
+  const [blocker, setBlocker] = useState("");
+  const [gear, setGear] = useState("");
+
+  const cycleStatus = (itemId) => {
+    setStatuses((s) => {
+      const current = s[itemId] || "none";
+      const next = STATUS_CYCLE[(STATUS_CYCLE.indexOf(current) + 1) % STATUS_CYCLE.length];
+      return { ...s, [itemId]: next };
+    });
+  };
+  const updateNote = (itemId, value) => setNotes((n) => ({ ...n, [itemId]: value }));
+
+  const handleSave = () => {
+    onSave({ id: uid(), date, location: location.trim(), depth: depth ? Number(depth) : null, statuses, notes, objective: objective.trim(), blocker: blocker.trim(), gear: gear.trim(), timestamp: Date.now() });
+  };
+
+  return (
+    <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "22px 22px 4px" }}>
+        <button onClick={onCancel} style={{ background: "none", border: "none", color: COLORS.dim, cursor: "pointer" }}><X size={24} /></button>
+        <div style={{ color: COLORS.cyan, fontWeight: 700, fontFamily: DISPLAY_FONT, letterSpacing: 2, fontSize: 15 }}>LOGGER UNE PLONGÉE</div>
+        <div style={{ width: 24 }} />
+      </div>
+      <div style={{ padding: "12px 20px 100px", overflowY: "auto" }}>
+        <div style={{ ...glass, background: COLORS.bgCard, borderRadius: 16, padding: 16, marginBottom: 16, border: "1px solid rgba(127,216,255,0.12)" }}>
+          <div style={{ color: COLORS.dim, fontSize: 11, letterSpacing: 1, marginBottom: 6 }}>DATE</div>
+          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={{
+            width: "100%", padding: "10px 12px", borderRadius: 10, border: "1px solid rgba(127,216,255,0.3)",
+            background: "rgba(255,255,255,0.04)", color: COLORS.white, fontSize: 14, fontFamily: BODY_FONT, marginBottom: 12, colorScheme: "dark",
+          }} />
+          <div style={{ display: "flex", gap: 10 }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ color: COLORS.dim, fontSize: 11, letterSpacing: 1, marginBottom: 6 }}>LIEU (OPTIONNEL)</div>
+              <input value={location} onChange={(e) => setLocation(e.target.value)} placeholder="Lac, mer..." style={{
+                width: "100%", padding: "10px 12px", borderRadius: 10, border: "1px solid rgba(127,216,255,0.3)",
+                background: "rgba(255,255,255,0.04)", color: COLORS.white, fontSize: 14, fontFamily: BODY_FONT,
+              }} />
+            </div>
+            <div style={{ width: 100 }}>
+              <div style={{ color: COLORS.dim, fontSize: 11, letterSpacing: 1, marginBottom: 6 }}>PROF. (M)</div>
+              <input value={depth} onChange={(e) => setDepth(e.target.value.replace(/[^0-9]/g, ""))} placeholder="0" inputMode="numeric" style={{
+                width: "100%", padding: "10px 12px", borderRadius: 10, border: "1px solid rgba(127,216,255,0.3)",
+                background: "rgba(255,255,255,0.04)", color: COLORS.white, fontSize: 14, fontFamily: BODY_FONT,
+              }} />
+            </div>
+          </div>
+        </div>
+
+        {DIVE_PHASES.map((phase) => (
+          <PhaseAccordion key={phase.id} phase={phase} expanded={expandedPhase === phase.id}
+            onToggle={() => setExpandedPhase(expandedPhase === phase.id ? null : phase.id)}
+            statuses={statuses} notes={notes} onCycle={cycleStatus} onNoteChange={updateNote} />
+        ))}
+
+        <div style={{ ...glass, background: COLORS.bgCard, borderRadius: 16, padding: 16, marginTop: 4, border: "1px solid rgba(244,177,63,0.25)" }}>
+          <div style={{ color: COLORS.orange, fontWeight: 700, fontSize: 14.5, fontFamily: DISPLAY_FONT, marginBottom: 12 }}>Phase 8 — Projection & prochaine séance</div>
+          <div style={{ color: COLORS.dim, fontSize: 11.5, marginBottom: 6 }}>OBJECTIF PRIORITAIRE (focus unique pour la prochaine fois)</div>
+          <textarea value={objective} onChange={(e) => setObjective(e.target.value)} rows={2} style={{
+            width: "100%", padding: "10px 12px", borderRadius: 10, border: "1px solid rgba(127,216,255,0.3)",
+            background: "rgba(255,255,255,0.04)", color: COLORS.white, fontSize: 13.5, fontFamily: BODY_FONT, marginBottom: 12, resize: "vertical",
+          }} />
+          <div style={{ color: COLORS.dim, fontSize: 11.5, marginBottom: 6 }}>PRINCIPAL FACTEUR LIMITANT (mental, technique, physique, froid...)</div>
+          <textarea value={blocker} onChange={(e) => setBlocker(e.target.value)} rows={2} style={{
+            width: "100%", padding: "10px 12px", borderRadius: 10, border: "1px solid rgba(127,216,255,0.3)",
+            background: "rgba(255,255,255,0.04)", color: COLORS.white, fontSize: 13.5, fontFamily: BODY_FONT, marginBottom: 12, resize: "vertical",
+          }} />
+          <div style={{ color: COLORS.dim, fontSize: 11.5, marginBottom: 6 }}>AJUSTEMENT MATÉRIEL / LESTE</div>
+          <textarea value={gear} onChange={(e) => setGear(e.target.value)} rows={2} style={{
+            width: "100%", padding: "10px 12px", borderRadius: 10, border: "1px solid rgba(127,216,255,0.3)",
+            background: "rgba(255,255,255,0.04)", color: COLORS.white, fontSize: 13.5, fontFamily: BODY_FONT, resize: "vertical",
+          }} />
+        </div>
+      </div>
+      <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, padding: "14px 20px calc(env(safe-area-inset-bottom) + 14px)", ...glass, background: "rgba(3,15,24,0.85)", borderTop: "1px solid rgba(127,216,255,0.15)" }}>
+        <button onClick={handleSave} style={{ ...primaryBtnStyle, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}><Check size={17} /> Enregistrer la plongée</button>
+      </div>
+    </div>
+  );
+}
+
+function DiveFocusCard({ entry }) {
+  const summary = computeFocusSummary(entry);
+  if (!summary) {
+    return (
+      <div style={{ ...glass, background: COLORS.bgCard, borderRadius: 18, padding: 20, marginBottom: 18, border: "1px solid rgba(127,216,255,0.15)", textAlign: "center" }}>
+        <Waves size={22} color={COLORS.cyan} style={{ marginBottom: 8 }} />
+        <div style={{ color: COLORS.dim, fontSize: 13.5 }}>Aucune plongée loggée pour l'instant. Ton premier mémo apparaîtra ici.</div>
+      </div>
+    );
+  }
+  return (
+    <div style={{ ...glass, background: COLORS.bgCard, borderRadius: 18, padding: 20, marginBottom: 18, border: "1px solid rgba(127,216,255,0.2)" }}>
+      <div style={{ color: COLORS.cyan, fontWeight: 700, fontSize: 13, letterSpacing: 1.5, fontFamily: DISPLAY_FONT, marginBottom: 12 }}>FOCUS POUR LA PROCHAINE PLONGÉE</div>
+      {summary.objective && (
+        <div style={{ marginBottom: 10 }}>
+          <div style={{ color: COLORS.dim, fontSize: 11 }}>Objectif</div>
+          <div style={{ color: COLORS.white, fontSize: 14 }}>{summary.objective}</div>
+        </div>
+      )}
+      {summary.blocker && (
+        <div style={{ marginBottom: 10 }}>
+          <div style={{ color: COLORS.dim, fontSize: 11 }}>Facteur limitant</div>
+          <div style={{ color: COLORS.white, fontSize: 14 }}>{summary.blocker}</div>
+        </div>
+      )}
+      {summary.workItems.length > 0 && (
+        <div>
+          <div style={{ color: COLORS.dim, fontSize: 11, marginBottom: 4 }}>À travailler</div>
+          {summary.workItems.map((t, i) => (
+            <div key={i} style={{ color: COLORS.orange, fontSize: 12.5, marginBottom: 3, display: "flex", gap: 6 }}>
+              <span>&#8226;</span><span>{t}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 export default function App() {
   const [screen, setScreen] = useState("train");
@@ -613,6 +858,7 @@ export default function App() {
   const [prSeconds, setPrSeconds] = useState(0);
   const [customTables, setCustomTables] = useState([]);
   const [history, setHistory] = useState([]);
+  const [diveLog, setDiveLog] = useState([]);
   const [hapticsOn, setHapticsOn] = useState(true);
   const [prBreatheSeconds, setPrBreatheSeconds] = useState(120);
   const [selectedDate, setSelectedDate] = useState(null);
@@ -623,10 +869,12 @@ export default function App() {
       const pr = await loadStored("apnea_pr", { seconds: 0 });
       const cust = await loadStored("apnea_custom_tables", []);
       const hist = await loadStored("apnea_history", []);
+      const dives = await loadStored("apnea_dive_log", []);
       const settings = await loadStored("apnea_settings", { haptics: true });
       setPrSeconds(pr.seconds || 0);
       setCustomTables(Array.isArray(cust) ? cust : []);
       setHistory(Array.isArray(hist) ? hist : []);
+      setDiveLog(Array.isArray(dives) ? dives : []);
       setHapticsOn(settings.haptics !== false);
       setHapticsEnabled(settings.haptics !== false);
       setPrBreatheSeconds(settings.prBreatheSeconds || 120);
@@ -636,6 +884,7 @@ export default function App() {
   useEffect(() => { if (loaded) saveStored("apnea_pr", { seconds: prSeconds }); }, [prSeconds, loaded]);
   useEffect(() => { if (loaded) saveStored("apnea_custom_tables", customTables); }, [customTables, loaded]);
   useEffect(() => { if (loaded) saveStored("apnea_history", history); }, [history, loaded]);
+  useEffect(() => { if (loaded) saveStored("apnea_dive_log", diveLog); }, [diveLog, loaded]);
   useEffect(() => { if (loaded) { saveStored("apnea_settings", { haptics: hapticsOn, prBreatheSeconds }); setHapticsEnabled(hapticsOn); } }, [hapticsOn, prBreatheSeconds, loaded]);
 
   const logHistory = useCallback((entry) => setHistory((h) => [{ id: uid(), date: todayKey(), timestamp: Date.now(), ...entry }, ...h]), []);
@@ -676,6 +925,13 @@ export default function App() {
     setShowCustomModal(false);
     showToast("Custom table added");
   };
+
+  const saveDiveEntry = (entry) => {
+    setDiveLog((d) => [entry, ...d]);
+    setScreen("diving");
+    showToast("Plong\u00E9e enregistr\u00E9e");
+  };
+  const deleteDiveEntry = (id) => setDiveLog((d) => d.filter((e) => e.id !== id));
 
   const [pendingTable, setPendingTable] = useState(null);
   const tpList = () => [autoTable("O2", prSeconds), autoTable("CO2", prSeconds), ...customTables];
@@ -807,7 +1063,7 @@ export default function App() {
       <Bubbles />
       <Toast message={toast} />
       <MiniBurstLayer />
-      <div key={screen} style={{ position: "relative", zIndex: 1, minHeight: "100vh", display: "flex", flexDirection: "column", paddingBottom: ["train", "pr", "history", "settings"].includes(screen) ? 90 : 0, animation: "fadeIn 0.25s ease-out" }}>
+      <div key={screen} style={{ position: "relative", zIndex: 1, minHeight: "100vh", display: "flex", flexDirection: "column", paddingBottom: ["train", "pr", "history", "diving", "settings"].includes(screen) ? 90 : 0, animation: "fadeIn 0.25s ease-out" }}>
 
         {screen === "train" && (
           <>
@@ -890,6 +1146,41 @@ export default function App() {
               })()}
             </div>
           </>
+        )}
+
+        {screen === "diving" && (
+          <>
+            <ScreenHeader title="Diving" />
+            <div style={{ padding: "0 20px" }}>
+              <DiveFocusCard entry={diveLog[0]} />
+              <button onClick={(e) => { const { x, y } = getEventXY(e); fireMiniBurst(x, y); setScreen("divelogform"); }} style={{ ...primaryBtnStyle, marginBottom: 20, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+                <Plus size={17} /> Logger une plongée
+              </button>
+              {diveLog.length > 0 && <div style={{ color: COLORS.dim, fontSize: 12, letterSpacing: 1, marginBottom: 10 }}>HISTORIQUE</div>}
+              {diveLog.map((entry) => {
+                const work = countWork(entry);
+                const dotColor = work === 0 ? COLORS.green : work <= 2 ? COLORS.orange : COLORS.red;
+                return (
+                  <div key={entry.id} style={{ ...glass, background: COLORS.bgCard, borderRadius: 14, padding: "14px 16px", marginBottom: 8, display: "flex", alignItems: "center", justifyContent: "space-between", border: "1px solid rgba(127,216,255,0.1)" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <div style={{ width: 9, height: 9, borderRadius: "50%", background: dotColor, flexShrink: 0 }} />
+                      <div>
+                        <div style={{ color: COLORS.white, fontWeight: 600, fontSize: 14 }}>{entry.date}{entry.location && ` \u00B7 ${entry.location}`}</div>
+                        <div style={{ color: COLORS.dim, fontSize: 11.5, marginTop: 2 }}>
+                          {entry.depth ? `${entry.depth}m \u00B7 ` : ""}{work} à travailler
+                        </div>
+                      </div>
+                    </div>
+                    <span onClick={() => setDeleteTarget({ kind: "dive", id: entry.id })} style={{ color: COLORS.red, cursor: "pointer", padding: 6 }}><Trash2 size={16} /></span>
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        )}
+
+        {screen === "divelogform" && (
+          <DiveLogForm onSave={saveDiveEntry} onCancel={() => setScreen("diving")} />
         )}
 
         {screen === "settings" && (
@@ -1036,11 +1327,12 @@ export default function App() {
         )}
       </div>
 
-      {["train", "pr", "history", "settings"].includes(screen) && (
+      {["train", "pr", "history", "diving", "settings"].includes(screen) && (
         <div style={tabBarStyle}>
           <TabButton active={screen === "train"} label="Train" Icon={Dumbbell} onClick={() => goTab("train")} />
           <TabButton active={screen === "pr"} label="PR" Icon={Timer} onClick={() => goTab("pr")} />
           <TabButton active={screen === "history"} label="History" Icon={BarChart3} onClick={() => goTab("history")} />
+          <TabButton active={screen === "diving"} label="Diving" Icon={Waves} onClick={() => goTab("diving")} />
           <TabButton active={screen === "settings"} label="Settings" Icon={Settings2} onClick={() => goTab("settings")} />
         </div>
       )}
@@ -1053,7 +1345,12 @@ export default function App() {
       {showExitConfirm && <ConfirmModal title="Exit session?" body="Your progress on this session won't be saved." confirmLabel="Exit" danger onConfirm={() => { setShowExitConfirm(false); setSRunning(false); setScreen("train"); }} onCancel={() => setShowExitConfirm(false)} />}
       {deleteTarget && (
         <ConfirmModal title="Delete this?" body="This can't be undone." confirmLabel="Delete" danger
-          onConfirm={() => { if (deleteTarget.kind === "custom") setCustomTables((c) => c.filter((t) => t.id !== deleteTarget.id)); else deleteHistoryEntry(deleteTarget.id); setDeleteTarget(null); }}
+          onConfirm={() => {
+            if (deleteTarget.kind === "custom") setCustomTables((c) => c.filter((t) => t.id !== deleteTarget.id));
+            else if (deleteTarget.kind === "dive") deleteDiveEntry(deleteTarget.id);
+            else deleteHistoryEntry(deleteTarget.id);
+            setDeleteTarget(null);
+          }}
           onCancel={() => setDeleteTarget(null)} />
       )}
       {confirmClearHistory && <ConfirmModal title="Clear all history?" body="This can't be undone." confirmLabel="Clear" danger onConfirm={() => { setHistory([]); setConfirmClearHistory(false); showToast("History cleared"); }} onCancel={() => setConfirmClearHistory(false)} />}
