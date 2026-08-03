@@ -46,6 +46,10 @@
       0% { opacity: 0; transform: translate(-50%, -10px); }
       100% { opacity: 1; transform: translate(-50%, 0); }
     }
+    @keyframes flashOut {
+      0% { opacity: 0.35; }
+      100% { opacity: 0; }
+    }
     @keyframes miniBurstOut {
       0% { transform: translate(-50%,-50%) translate(0,0); opacity: 1; }
       100% { transform: translate(-50%,-50%) translate(var(--dx), var(--dy)); opacity: 0; }
