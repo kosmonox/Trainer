@@ -174,19 +174,21 @@ function PhaseTint({ active, mode }) {
   return <div style={{ position: "fixed", inset: 0, zIndex: 0, background: active ? color : "transparent", transition: "background 0.6s ease" }} />;
 }
 
-function BubbleBurst({ burstTrigger }) {
+function BubbleBurst({ burstTrigger, big }) {
   const [particles, setParticles] = useState([]);
   useEffect(() => {
     if (!burstTrigger) return;
-    const n = 24;
+    const n = big ? 42 : 24;
+    const maxDist = big ? 90 : 60;
+    const distRange = big ? 130 : 90;
     const arr = Array.from({ length: n }).map(() => {
-      const angle = Math.random() * 360, dist = 60 + Math.random() * 90;
-      return { id: uid(), angle, dist, size: 3 + Math.random() * 7, delay: Math.random() * 0.15 };
+      const angle = Math.random() * 360, dist = maxDist + Math.random() * distRange;
+      return { id: uid(), angle, dist, size: (big ? 4 : 3) + Math.random() * (big ? 10 : 7), delay: Math.random() * 0.2 };
     });
     setParticles(arr);
-    const t = setTimeout(() => setParticles([]), 1100);
+    const t = setTimeout(() => setParticles([]), big ? 1400 : 1100);
     return () => clearTimeout(t);
-  }, [burstTrigger]);
+  }, [burstTrigger, big]);
   if (particles.length === 0) return null;
   return (
     <div style={{ position: "fixed", inset: 0, pointerEvents: "none", zIndex: 5 }}>
@@ -196,11 +198,23 @@ function BubbleBurst({ burstTrigger }) {
         return <div key={p.id} style={{
           position: "absolute", top: "50%", left: "50%", width: p.size, height: p.size, borderRadius: "50%",
           background: COLORS.cyanBright, boxShadow: "0 0 6px rgba(168,232,255,0.9)",
-          animation: `burstOut 1s ease-out ${p.delay}s forwards`, "--dx": `${dx}px`, "--dy": `${dy}px`,
+          animation: `burstOut ${big ? 1.3 : 1}s ease-out ${p.delay}s forwards`, "--dx": `${dx}px`, "--dy": `${dy}px`,
         }} />;
       })}
     </div>
   );
+}
+
+function ScreenFlash({ trigger, color }) {
+  const [show, setShow] = useState(false);
+  useEffect(() => {
+    if (!trigger) return;
+    setShow(true);
+    const t = setTimeout(() => setShow(false), 500);
+    return () => clearTimeout(t);
+  }, [trigger]);
+  if (!show) return null;
+  return <div style={{ position: "fixed", inset: 0, zIndex: 4, background: color, pointerEvents: "none", animation: "flashOut 0.5s ease-out forwards" }} />;
 }
 
 function MiniBurstLayer() {
@@ -371,6 +385,43 @@ function MiniStepper({ value, onDec, onInc }) {
   );
 }
 
+const ONBOARDING_SLIDES = [
+  { icon: Dumbbell, title: "Train", body: "Des tables O2/CO2 automatiquement ajust\u00E9es \u00E0 ton record personnel, plus tes propres tables custom." },
+  { icon: Timer, title: "PR", body: "Chronom\u00E8tre tes tentatives de record avec breathe-up, ghost pacer, et connexion HR par Bluetooth." },
+  { icon: Waves, title: "History & Diving", body: "Suis ta progression \u00E0 sec, et logue tes plong\u00E9es en mer avec la checklist des 8 phases." },
+];
+
+function OnboardingScreen({ step, onNext, onSkip }) {
+  const slide = ONBOARDING_SLIDES[step];
+  const Icon = slide.icon;
+  return (
+    <div style={{ position: "fixed", inset: 0, background: COLORS.bg, zIndex: 100, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 40 }}>
+      <Bubbles count={10} />
+      <div style={{ position: "relative", zIndex: 1, textAlign: "center", maxWidth: 320 }}>
+        <div style={{
+          width: 84, height: 84, borderRadius: "50%", background: "rgba(127,216,255,0.12)", border: "1px solid rgba(127,216,255,0.3)",
+          display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 26px",
+        }}>
+          <Icon size={36} color={COLORS.cyanBright} />
+        </div>
+        <div style={{ color: COLORS.white, fontWeight: 700, fontSize: 26, fontFamily: DISPLAY_FONT, letterSpacing: 2, textTransform: "uppercase", marginBottom: 14 }}>{slide.title}</div>
+        <div style={{ color: COLORS.dim, fontSize: 15, lineHeight: 1.6, marginBottom: 40 }}>{slide.body}</div>
+        <div style={{ display: "flex", justifyContent: "center", gap: 8, marginBottom: 30 }}>
+          {ONBOARDING_SLIDES.map((_, i) => (
+            <div key={i} style={{ width: i === step ? 22 : 8, height: 8, borderRadius: 4, background: i === step ? COLORS.cyanBright : "rgba(127,216,255,0.25)", transition: "width 0.2s" }} />
+          ))}
+        </div>
+        <button onClick={onNext} style={{ ...primaryBtnStyle, maxWidth: 280 }}>
+          {step === ONBOARDING_SLIDES.length - 1 ? "Commencer" : "Suivant"}
+        </button>
+        {step < ONBOARDING_SLIDES.length - 1 && (
+          <button onClick={onSkip} style={{ background: "none", border: "none", color: COLORS.dim, fontSize: 13, marginTop: 16, cursor: "pointer" }}>Passer</button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function ConfirmModal({ title, body, confirmLabel, danger, onConfirm, onCancel }) {
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(3,15,24,0.85)", zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
@@ -389,7 +440,7 @@ function ConfirmModal({ title, body, confirmLabel, danger, onConfirm, onCancel }
 function DifficultyPicker({ defaultDifficulty, onPick, onCancel }) {
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(3,15,24,0.85)", zIndex: 50, display: "flex", alignItems: "flex-end" }}>
-      <div style={{ ...glass, background: "rgba(10,31,46,0.9)", borderRadius: "20px 20px 0 0", padding: 22, width: "100%", border: "1px solid rgba(127,216,255,0.2)" }}>
+      <div style={{ ...glass, background: "rgba(10,31,46,0.9)", borderRadius: "22px 22px 0 0", padding: 22, width: "100%", border: "1px solid rgba(127,216,255,0.2)" }}>
         <div style={{ color: COLORS.white, fontWeight: 700, fontSize: 18, fontFamily: DISPLAY_FONT, marginBottom: 14, textAlign: "center" }}>Choose intensity</div>
         {Object.entries(DIFFICULTIES).map(([key, d]) => (
           <button key={key} onClick={(e) => { const { x, y } = getEventXY(e); fireMiniBurst(x, y); onPick(key); }} style={{
@@ -441,7 +492,7 @@ function CalendarGrid({ history, selectedDate, onSelectDate }) {
   for (let d = 1; d <= daysInMonth; d++) cells.push(d);
 
   return (
-    <div style={{ ...glass, background: COLORS.bgCard, borderRadius: 20, padding: 18, marginBottom: 20, border: "1px solid rgba(127,216,255,0.15)" }}>
+    <div style={{ ...glass, background: COLORS.bgCard, borderRadius: 18, padding: 18, marginBottom: 20, border: "1px solid rgba(127,216,255,0.15)" }}>
       <div style={{ textAlign: "center", color: COLORS.white, fontWeight: 700, fontFamily: DISPLAY_FONT, letterSpacing: 1, marginBottom: 12 }}>{monthName} {year}</div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4, marginBottom: 4 }}>
         {["S", "M", "T", "W", "T", "F", "S"].map((d, i) => (
@@ -483,12 +534,12 @@ const circleBtnStyle = {
   display: "flex", alignItems: "center", justifyContent: "center",
 };
 const primaryBtnStyle = {
-  width: "100%", padding: "17px 0", borderRadius: 16, fontWeight: 700, fontSize: 16, letterSpacing: 1.5,
+  width: "100%", padding: "17px 0", borderRadius: 14, fontWeight: 700, fontSize: 16, letterSpacing: 1.5,
   border: "1px solid rgba(127,216,255,0.4)", background: "rgba(127,216,255,0.15)", color: COLORS.cyanBright,
   cursor: "pointer", fontFamily: DISPLAY_FONT, textTransform: "uppercase", ...glass,
 };
 const pillBtnStyle = {
-  padding: "11px 18px", borderRadius: 20, fontWeight: 600, fontSize: 13, letterSpacing: 0.5,
+  padding: "11px 18px", borderRadius: 18, fontWeight: 600, fontSize: 13, letterSpacing: 0.5,
   border: "1px solid rgba(127,216,255,0.35)", background: "rgba(127,216,255,0.1)", color: COLORS.cyan,
   cursor: "pointer", fontFamily: BODY_FONT, ...glass,
 };
@@ -514,7 +565,7 @@ function TabButton({ active, label, Icon, onClick }) {
 }
 function ToggleRow({ label, sub, checked, onChange }) {
   return (
-    <div style={{ ...glass, display: "flex", alignItems: "center", justifyContent: "space-between", background: COLORS.bgCard, borderRadius: 16, padding: "17px 19px", marginBottom: 12, border: "1px solid rgba(127,216,255,0.12)" }}>
+    <div style={{ ...glass, display: "flex", alignItems: "center", justifyContent: "space-between", background: COLORS.bgCard, borderRadius: 14, padding: "17px 19px", marginBottom: 12, border: "1px solid rgba(127,216,255,0.12)" }}>
       <div>
         <div style={{ color: COLORS.white, fontWeight: 600, fontSize: 16 }}>{label}</div>
         {sub && <div style={{ color: COLORS.dim, fontSize: 12.5, marginTop: 2 }}>{sub}</div>}
@@ -591,13 +642,13 @@ function CustomTableModal({ prSeconds, initial, onAdd, onCancel }) {
         {!advanced && (
           <>
             <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Table name" style={{
-              width: "100%", padding: "12px 14px", borderRadius: 12, border: "1px solid rgba(127,216,255,0.3)",
+              width: "100%", padding: "12px 14px", borderRadius: 10, border: "1px solid rgba(127,216,255,0.3)",
               background: "rgba(255,255,255,0.04)", color: COLORS.white, fontSize: 15, marginBottom: 12, fontFamily: BODY_FONT,
             }} />
             <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
               {["O2", "CO2"].map((tt) => (
                 <button key={tt} onClick={() => setType(tt)} style={{
-                  flex: 1, padding: "12px 0", borderRadius: 12, fontWeight: 700, fontSize: 14, cursor: "pointer", fontFamily: DISPLAY_FONT,
+                  flex: 1, padding: "12px 0", borderRadius: 10, fontWeight: 700, fontSize: 14, cursor: "pointer", fontFamily: DISPLAY_FONT,
                   border: type === tt ? `1px solid ${COLORS.cyan}` : "1px solid rgba(127,216,255,0.15)",
                   background: type === tt ? "rgba(127,216,255,0.15)" : "transparent", color: type === tt ? COLORS.cyanBright : COLORS.dim,
                 }}>{tt}</button>
@@ -622,7 +673,7 @@ function CustomTableModal({ prSeconds, initial, onAdd, onCancel }) {
           <>
             <div style={{ maxHeight: 280, overflowY: "auto", marginBottom: 12 }}>
               {customRounds.map((r, i) => (
-                <div key={i} style={{ background: COLORS.bgCardHi, borderRadius: 12, padding: "10px 12px", marginBottom: 8, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                <div key={i} style={{ background: COLORS.bgCardHi, borderRadius: 10, padding: "10px 12px", marginBottom: 8, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
                   <div style={{ color: COLORS.dim, fontSize: 12, fontWeight: 700, minWidth: 46 }}>R{i + 1}</div>
                   <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
                     <div style={{ color: COLORS.dim, fontSize: 9, letterSpacing: 0.5 }}>BREATHE</div>
@@ -656,7 +707,7 @@ function PrEditSheet({ initial, onSave, onCancel }) {
   const [draft, setDraft] = useState(initial);
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(3,15,24,0.85)", zIndex: 50, display: "flex", alignItems: "flex-end" }}>
-      <div style={{ ...glass, background: "rgba(10,31,46,0.92)", borderRadius: "20px 20px 0 0", padding: 24, width: "100%", border: "1px solid rgba(127,216,255,0.2)" }}>
+      <div style={{ ...glass, background: "rgba(10,31,46,0.92)", borderRadius: "22px 22px 0 0", padding: 24, width: "100%", border: "1px solid rgba(127,216,255,0.2)" }}>
         <div style={{ color: COLORS.white, fontWeight: 700, fontSize: 17, fontFamily: DISPLAY_FONT, marginBottom: 18, textAlign: "center", letterSpacing: 1 }}>SET PERSONAL BEST</div>
         <div style={{ textAlign: "center", fontSize: 56, fontWeight: 700, color: COLORS.white, fontFamily: DISPLAY_FONT, fontVariantNumeric: "tabular-nums", marginBottom: 20 }}>{formatTime(draft)}</div>
         <div style={{ display: "flex", justifyContent: "center", gap: 14, marginBottom: 22 }}>
@@ -713,7 +764,7 @@ function DiveItemRow({ item, status, note, onSetStatus, onNoteChange }) {
 function PhaseAccordion({ phase, expanded, onToggle, statuses, notes, onSetStatus, onNoteChange }) {
   const doneCount = phase.items.filter((it) => !!statuses[it.id]).length;
   return (
-    <div style={{ ...glass, background: COLORS.bgCard, borderRadius: 16, marginBottom: 12, border: "1px solid rgba(127,216,255,0.12)", overflow: "hidden" }}>
+    <div style={{ ...glass, background: COLORS.bgCard, borderRadius: 14, marginBottom: 12, border: "1px solid rgba(127,216,255,0.12)", overflow: "hidden" }}>
       <button onClick={onToggle} style={{ width: "100%", padding: "16px 18px", background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div style={{ color: COLORS.white, fontWeight: 700, fontSize: 14.5, fontFamily: DISPLAY_FONT, textAlign: "left" }}>{phase.title}</div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -761,7 +812,7 @@ function DiveLogForm({ initial, depthUnit, onSave, onCancel }) {
         <div style={{ width: 24 }} />
       </div>
       <div style={{ padding: "12px 20px 100px", overflowY: "auto" }}>
-        <div style={{ ...glass, background: COLORS.bgCard, borderRadius: 16, padding: 16, marginBottom: 16, border: "1px solid rgba(127,216,255,0.12)" }}>
+        <div style={{ ...glass, background: COLORS.bgCard, borderRadius: 14, padding: 16, marginBottom: 16, border: "1px solid rgba(127,216,255,0.12)" }}>
           <div style={{ color: COLORS.dim, fontSize: 11, letterSpacing: 1, marginBottom: 6 }}>DATE</div>
           <input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={{
             width: "100%", padding: "10px 12px", borderRadius: 10, border: "1px solid rgba(127,216,255,0.3)",
@@ -791,7 +842,7 @@ function DiveLogForm({ initial, depthUnit, onSave, onCancel }) {
             statuses={statuses} notes={notes} onSetStatus={setItemStatus} onNoteChange={updateNote} />
         ))}
 
-        <div style={{ ...glass, background: COLORS.bgCard, borderRadius: 16, padding: 16, marginTop: 4, border: "1px solid rgba(244,177,63,0.25)" }}>
+        <div style={{ ...glass, background: COLORS.bgCard, borderRadius: 14, padding: 16, marginTop: 4, border: "1px solid rgba(244,177,63,0.25)" }}>
           <div style={{ color: COLORS.orange, fontWeight: 700, fontSize: 14.5, fontFamily: DISPLAY_FONT, marginBottom: 12 }}>Phase 8 — Projection & prochaine séance</div>
           <div style={{ color: COLORS.dim, fontSize: 11.5, marginBottom: 6 }}>OBJECTIF PRIORITAIRE (focus unique pour la prochaine fois)</div>
           <textarea value={objective} onChange={(e) => setObjective(e.target.value)} rows={2} style={{
@@ -870,6 +921,8 @@ function DiveFocusCard({ entry }) {
 export default function App() {
   const [screen, setScreen] = useState("train");
   const [loaded, setLoaded] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  const [onboardingStep, setOnboardingStep] = useState(0);
   const [toast, setToast] = useState(null);
   const showToast = (msg) => setToast(msg);
   useEffect(() => { if (!toast) return; const t = setTimeout(() => setToast(null), 2200); return () => clearTimeout(t); }, [toast]);
@@ -892,6 +945,7 @@ export default function App() {
       const hist = await loadStored("apnea_history", []);
       const dives = await loadStored("apnea_dive_log", []);
       const settings = await loadStored("apnea_settings", { haptics: true });
+      const onboardingSeen = await loadStored("apnea_onboarding_seen", false);
       setPrSeconds(pr.seconds || 0);
       setCustomTables(Array.isArray(cust) ? cust : []);
       setHistory(Array.isArray(hist) ? hist : []);
@@ -901,6 +955,7 @@ export default function App() {
       setPrBreatheSeconds(settings.prBreatheSeconds || 120);
       setDepthUnit(settings.depthUnit || "m");
       setDefaultDifficulty(settings.defaultDifficulty || "normal");
+      setShowOnboarding(!onboardingSeen);
       setLoaded(true);
     })();
   }, []);
@@ -997,6 +1052,7 @@ export default function App() {
   const [sContractions, setSContractions] = useState(0);
   const [sRipple, setSRipple] = useState(0);
   const [sBurst, setSBurst] = useState(0);
+  const [sBurstBig, setSBurstBig] = useState(0);
   const [showSurfaceConfirm, setShowSurfaceConfirm] = useState(false);
   const [showExitConfirm, setShowExitConfirm] = useState(false);
   const warnedRef = useRef(false);
@@ -1026,7 +1082,7 @@ export default function App() {
       } else {
         const nextRound = sRound + 1;
         if (nextRound > sRoundsPlan.length) {
-          setSRunning(false); setSPhase("done"); setSBurst((n) => n + 1);
+          setSRunning(false); setSPhase("done"); setSBurstBig((n) => n + 1);
           logHistory({ type: "table", name: sTable.name, difficulty: sDifficulty, completed: true, failedRound: null });
         } else {
           const next = sRoundsPlan[nextRound - 1];
@@ -1103,6 +1159,21 @@ export default function App() {
     );
   }
 
+  const finishOnboarding = () => {
+    saveStored("apnea_onboarding_seen", true);
+    setShowOnboarding(false);
+  };
+
+  if (showOnboarding) {
+    return (
+      <OnboardingScreen
+        step={onboardingStep}
+        onNext={() => (onboardingStep === ONBOARDING_SLIDES.length - 1 ? finishOnboarding() : setOnboardingStep((s) => s + 1))}
+        onSkip={finishOnboarding}
+      />
+    );
+  }
+
   const sessionTintActive = screen === "session" || screen === "prattempt";
   const sessionTintMode = screen === "session" ? (sPhase === "hold" ? "hold" : "breathe") : screen === "prattempt" ? (paMode === "attempt" ? "hold" : "breathe") : null;
 
@@ -1175,7 +1246,16 @@ export default function App() {
                 return (
                   <>
                     <div style={{ color: COLORS.dim, fontSize: 13, letterSpacing: 1, marginBottom: 10 }}>{selectedDate ? selectedDate : "TODAY"}</div>
-                    {entries.length === 0 && <div style={{ color: COLORS.dim, textAlign: "center", marginTop: 10, marginBottom: 10 }}>No sessions this day</div>}
+                    {entries.length === 0 && (
+                      <div style={{ textAlign: "center", marginTop: 18, marginBottom: 18 }}>
+                        <div style={{ position: "relative", width: 60, height: 40, margin: "0 auto 10px" }}>
+                          <div style={{ position: "absolute", left: 18, top: 10, width: 22, height: 22, borderRadius: "50%", background: "rgba(127,216,255,0.15)", border: "1px solid rgba(127,216,255,0.3)" }} />
+                          <div style={{ position: "absolute", left: 2, top: 20, width: 12, height: 12, borderRadius: "50%", background: "rgba(127,216,255,0.1)", border: "1px solid rgba(127,216,255,0.2)" }} />
+                          <div style={{ position: "absolute", left: 42, top: 2, width: 9, height: 9, borderRadius: "50%", background: "rgba(127,216,255,0.1)", border: "1px solid rgba(127,216,255,0.2)" }} />
+                        </div>
+                        <div style={{ color: COLORS.dim, fontSize: 13.5 }}>Rien ce jour-là — choisis une autre date sur le calendrier</div>
+                      </div>
+                    )}
                     {entries.map((e) => (
                       <div key={e.id} style={{ ...glass, background: COLORS.bgCard, borderRadius: 14, padding: "14px 16px", marginBottom: 8, display: "flex", alignItems: "center", justifyContent: "space-between", border: "1px solid rgba(127,216,255,0.1)" }}>
                         <div>
@@ -1240,7 +1320,7 @@ export default function App() {
               <ToggleRow label="Haptics" sub="Vibration cues during sessions" checked={hapticsOn} onChange={setHapticsOn} />
               <Stepper label="PR breathe-up (s)" value={prBreatheSeconds} onDec={() => setPrBreatheSeconds((v) => Math.max(15, v - 10))} onInc={() => setPrBreatheSeconds((v) => v + 10)} />
 
-              <div style={{ ...glass, background: COLORS.bgCard, borderRadius: 16, padding: "16px 18px", marginBottom: 12, border: "1px solid rgba(127,216,255,0.12)" }}>
+              <div style={{ ...glass, background: COLORS.bgCard, borderRadius: 14, padding: "16px 18px", marginBottom: 12, border: "1px solid rgba(127,216,255,0.12)" }}>
                 <div style={{ color: COLORS.white, fontWeight: 600, fontSize: 15, marginBottom: 10 }}>Unité de profondeur</div>
                 <div style={{ display: "flex", gap: 10 }}>
                   {["m", "ft"].map((u) => (
@@ -1253,7 +1333,7 @@ export default function App() {
                 </div>
               </div>
 
-              <div style={{ ...glass, background: COLORS.bgCard, borderRadius: 16, padding: "16px 18px", marginBottom: 12, border: "1px solid rgba(127,216,255,0.12)" }}>
+              <div style={{ ...glass, background: COLORS.bgCard, borderRadius: 14, padding: "16px 18px", marginBottom: 12, border: "1px solid rgba(127,216,255,0.12)" }}>
                 <div style={{ color: COLORS.white, fontWeight: 600, fontSize: 15, marginBottom: 10 }}>Difficulté par défaut</div>
                 <div style={{ display: "flex", gap: 8 }}>
                   {Object.entries(DIFFICULTIES).map(([key, d]) => (
@@ -1308,6 +1388,8 @@ export default function App() {
               <div style={{ position: "relative" }}>
                 <RippleRings trigger={sRipple} color={sPhase === "breathe" || sPhase === "ready" ? COLORS.green : COLORS.cyan} />
                 <BubbleBurst burstTrigger={sBurst} />
+                <BubbleBurst burstTrigger={sBurstBig} big />
+                <ScreenFlash trigger={sBurstBig} color="rgba(127,232,168,0.4)" />
                 <ProgressRing fraction={sRunning || sPhase === "hold" || sPhase === "breathe" ? sFraction : 0} color={sPhase === "breathe" || sPhase === "ready" ? COLORS.green : COLORS.cyan} />
                 <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
                   <div style={{ fontSize: 14, letterSpacing: 3, color: sPhase === "breathe" || sPhase === "ready" ? COLORS.greenBright : COLORS.cyanBright, fontWeight: 700, fontFamily: DISPLAY_FONT }}>
@@ -1344,7 +1426,7 @@ export default function App() {
             <div style={{ padding: "0 20px 22px" }}>
               {sPhase === "hold" && (
                 <button onClick={() => setShowSurfaceConfirm(true)} style={{
-                  width: "100%", marginBottom: 14, padding: "13px 0", borderRadius: 16, fontWeight: 700, fontSize: 13, letterSpacing: 1,
+                  width: "100%", marginBottom: 14, padding: "13px 0", borderRadius: 14, fontWeight: 700, fontSize: 13, letterSpacing: 1,
                   border: "1px solid rgba(255,118,118,0.4)", background: "rgba(255,118,118,0.12)", color: COLORS.red, cursor: "pointer", fontFamily: DISPLAY_FONT,
                   display: "flex", alignItems: "center", justifyContent: "center", gap: 6, ...glass,
                 }}><AlertTriangle size={14} /> I surfaced</button>
@@ -1370,7 +1452,8 @@ export default function App() {
               {...(paMode === "attempt" ? paLongPress.handlers : {})}
             >
               <div style={{ position: "relative" }}>
-                <BubbleBurst burstTrigger={paBurst} />
+                <BubbleBurst burstTrigger={paBurst} big />
+                <ScreenFlash trigger={paBurst} color="rgba(244,177,63,0.4)" />
                 <ProgressRing fraction={paMode === "attempt" && prSeconds > 0 ? paElapsed / prSeconds : paMode === "breathe" ? 1 - paTimer / prBreatheSeconds : 0} color={paMode === "breathe" ? COLORS.green : COLORS.cyan} />
                 <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
                   <div style={{ fontSize: 14, letterSpacing: 3, color: paMode === "breathe" ? COLORS.greenBright : COLORS.cyanBright, fontWeight: 700, fontFamily: DISPLAY_FONT }}>
