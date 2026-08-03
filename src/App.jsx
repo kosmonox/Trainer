@@ -6,7 +6,7 @@ import {
 } from "lucide-react";
 import { loadStored, saveStored } from "./storage.js";
 import { scanAndConnectHrMonitor, disconnectHrMonitor } from "./ble.js";
-import { warningPulse, transitionPulse, minutePulse, prBeatPulse, setHapticsEnabled } from "./haptics.js";
+import { warningPulse, transitionPulse, minutePulse, prBeatPulse, setHapticsEnabled, testVibrate } from "./haptics.js";
 
 const COLORS = {
   bg: "#030f18",
@@ -614,6 +614,7 @@ export default function App() {
   const [customTables, setCustomTables] = useState([]);
   const [history, setHistory] = useState([]);
   const [hapticsOn, setHapticsOn] = useState(true);
+  const [prBreatheSeconds, setPrBreatheSeconds] = useState(120);
   const [selectedDate, setSelectedDate] = useState(null);
   const [showPrEdit, setShowPrEdit] = useState(false);
 
@@ -628,13 +629,14 @@ export default function App() {
       setHistory(Array.isArray(hist) ? hist : []);
       setHapticsOn(settings.haptics !== false);
       setHapticsEnabled(settings.haptics !== false);
+      setPrBreatheSeconds(settings.prBreatheSeconds || 120);
       setLoaded(true);
     })();
   }, []);
   useEffect(() => { if (loaded) saveStored("apnea_pr", { seconds: prSeconds }); }, [prSeconds, loaded]);
   useEffect(() => { if (loaded) saveStored("apnea_custom_tables", customTables); }, [customTables, loaded]);
   useEffect(() => { if (loaded) saveStored("apnea_history", history); }, [history, loaded]);
-  useEffect(() => { if (loaded) { saveStored("apnea_settings", { haptics: hapticsOn }); setHapticsEnabled(hapticsOn); } }, [hapticsOn, loaded]);
+  useEffect(() => { if (loaded) { saveStored("apnea_settings", { haptics: hapticsOn, prBreatheSeconds }); setHapticsEnabled(hapticsOn); } }, [hapticsOn, prBreatheSeconds, loaded]);
 
   const logHistory = useCallback((entry) => setHistory((h) => [{ id: uid(), date: todayKey(), timestamp: Date.now(), ...entry }, ...h]), []);
   const deleteHistoryEntry = useCallback((id) => setHistory((h) => h.filter((e) => e.id !== id)), []);
@@ -756,7 +758,7 @@ export default function App() {
   const lastMinuteRef = useRef(0);
 
   const startPrAttempt = () => {
-    setPaMode("breathe"); setPaTimer(120); setPaElapsed(0); setPaContractions(0); setPaIsPR(false);
+    setPaMode("breathe"); setPaTimer(prBreatheSeconds); setPaElapsed(0); setPaContractions(0); setPaIsPR(false);
     lastMinuteRef.current = 0; resetHr(); setScreen("prattempt");
   };
 
@@ -836,6 +838,11 @@ export default function App() {
               <button onClick={() => setShowPrEdit(true)} style={{ ...pillBtnStyle, marginTop: 14, display: "inline-flex", alignItems: "center", gap: 6 }}>
                 <Pencil size={13} /> Edit
               </button>
+              <div style={{ marginTop: 10 }}>
+                <button onClick={async () => { const ok = await testVibrate(); showToast(ok ? "Vibration triggered - did you feel it?" : "Vibration call failed"); }} style={{ ...pillBtnStyle, display: "inline-flex", alignItems: "center", gap: 6 }}>
+                  <Zap size={13} /> Test vibration
+                </button>
+              </div>
 
               {prAttemptStats.count > 0 && (
                 <div style={{ color: COLORS.dim, fontSize: 13, marginTop: 18 }}>
@@ -890,6 +897,8 @@ export default function App() {
             <ScreenHeader title="Settings" />
             <div style={{ padding: "0 20px" }}>
               <ToggleRow label="Haptics" sub="Vibration cues during sessions" checked={hapticsOn} onChange={setHapticsOn} />
+              <Stepper label="PR breathe-up (s)" value={prBreatheSeconds} onDec={() => setPrBreatheSeconds((v) => Math.max(15, v - 10))} onInc={() => setPrBreatheSeconds((v) => v + 10)} />
+              <div style={{ height: 4 }} />
               <button onClick={() => setConfirmResetPr(true)} style={{ ...primaryBtnStyle, marginBottom: 12, background: "rgba(255,255,255,0.05)", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
                 <RotateCcw size={16} /> Reset personal best
               </button>
@@ -991,7 +1000,7 @@ export default function App() {
             >
               <div style={{ position: "relative" }}>
                 <BubbleBurst burstTrigger={paBurst} />
-                <ProgressRing fraction={paMode === "attempt" && prSeconds > 0 ? paElapsed / prSeconds : paMode === "breathe" ? 1 - paTimer / 120 : 0} color={paMode === "breathe" ? COLORS.green : COLORS.cyan} />
+                <ProgressRing fraction={paMode === "attempt" && prSeconds > 0 ? paElapsed / prSeconds : paMode === "breathe" ? 1 - paTimer / prBreatheSeconds : 0} color={paMode === "breathe" ? COLORS.green : COLORS.cyan} />
                 <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
                   <div style={{ fontSize: 14, letterSpacing: 3, color: paMode === "breathe" ? COLORS.greenBright : COLORS.cyanBright, fontWeight: 700, fontFamily: DISPLAY_FONT }}>
                     {paMode === "breathe" ? "BREATHE UP" : paMode === "attempt" ? "HOLD - GO" : paIsPR ? "NEW PR!" : "GOOD EFFORT"}
