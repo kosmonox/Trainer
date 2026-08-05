@@ -7,7 +7,7 @@ import {
 } from "lucide-react";
 import { loadStored, saveStored } from "./storage.js";
 import { scanAndConnectHrMonitor, disconnectHrMonitor } from "./ble.js";
-import { transitionPulse, minutePulse, prBeatPulse, countdownTick, setHapticsEnabled, testVibrate } from "./haptics.js";
+import { transitionPulse, minutePulse, prBeatPulse, countdownTick, shakeAlert, recoveryCompletePulse, setHapticsEnabled, testVibrate } from "./haptics.js";
 import { Share } from "@capacitor/share";
 
 const COLORS = {
@@ -936,6 +936,9 @@ export default function App() {
   const [prBreatheSeconds, setPrBreatheSeconds] = useState(120);
   const [depthUnit, setDepthUnit] = useState("m");
   const [defaultDifficulty, setDefaultDifficulty] = useState("normal");
+  const [warnThreshold1, setWarnThreshold1] = useState(20);
+  const [warnThreshold2, setWarnThreshold2] = useState(10);
+  const [recoveryMinutes, setRecoveryMinutes] = useState(2);
   const [selectedDate, setSelectedDate] = useState(null);
   const [showPrEdit, setShowPrEdit] = useState(false);
 
@@ -956,6 +959,9 @@ export default function App() {
       setPrBreatheSeconds(settings.prBreatheSeconds || 120);
       setDepthUnit(settings.depthUnit || "m");
       setDefaultDifficulty(settings.defaultDifficulty || "normal");
+      setWarnThreshold1(settings.warnThreshold1 || 20);
+      setWarnThreshold2(settings.warnThreshold2 || 10);
+      setRecoveryMinutes(settings.recoveryMinutes != null ? settings.recoveryMinutes : 2);
       setShowOnboarding(!onboardingSeen);
       setLoaded(true);
     })();
@@ -964,9 +970,16 @@ export default function App() {
   useEffect(() => { if (loaded) saveStored("apnea_custom_tables", customTables); }, [customTables, loaded]);
   useEffect(() => { if (loaded) saveStored("apnea_history", history); }, [history, loaded]);
   useEffect(() => { if (loaded) saveStored("apnea_dive_log", diveLog); }, [diveLog, loaded]);
-  useEffect(() => { if (loaded) { saveStored("apnea_settings", { haptics: hapticsOn, prBreatheSeconds, depthUnit, defaultDifficulty }); setHapticsEnabled(hapticsOn); } }, [hapticsOn, prBreatheSeconds, depthUnit, defaultDifficulty, loaded]);
+  useEffect(() => { if (loaded) { saveStored("apnea_settings", { haptics: hapticsOn, prBreatheSeconds, depthUnit, defaultDifficulty, warnThreshold1, warnThreshold2, recoveryMinutes }); setHapticsEnabled(hapticsOn); } }, [hapticsOn, prBreatheSeconds, depthUnit, defaultDifficulty, warnThreshold1, warnThreshold2, recoveryMinutes, loaded]);
 
-  const logHistory = useCallback((entry) => setHistory((h) => [{ id: uid(), date: todayKey(), timestamp: Date.now(), ...entry }, ...h]), []);
+  const logHistory = useCallback((entry) => {
+    const id = entry.id || uid();
+    setHistory((h) => [{ id, date: todayKey(), timestamp: Date.now(), ...entry }, ...h]);
+    return id;
+  }, []);
+  const markRecovery = useCallback((id, completed) => {
+    setHistory((h) => h.map((e) => (e.id === id ? { ...e, recoveryCompleted: completed } : e)));
+  }, []);
   const deleteHistoryEntry = useCallback((id) => setHistory((h) => h.filter((e) => e.id !== id)), []);
 
   const prAttemptStats = (() => {
@@ -1054,6 +1067,8 @@ export default function App() {
   const [sRipple, setSRipple] = useState(0);
   const [sBurst, setSBurst] = useState(0);
   const [sBurstBig, setSBurstBig] = useState(0);
+  const [sRecoverySeconds, setSRecoverySeconds] = useState(0);
+  const sHistoryIdRef = useRef(null);
   const [showSurfaceConfirm, setShowSurfaceConfirm] = useState(false);
   const [showExitConfirm, setShowExitConfirm] = useState(false);
 
@@ -1063,6 +1078,7 @@ export default function App() {
     setSTable(table); setSDifficulty(difficulty); setSRoundsPlan(plan); setSRound(1);
     setSHoldTime(plan[0].hold); setSBreatheTime(plan[0].breathe);
     setSPhase("ready"); setSTimer(plan[0].breathe); setSRunning(false); setSContractions(0);
+    setSRecoverySeconds(0); sHistoryIdRef.current = null;
     resetHr(); setPendingTable(null); setScreen("session");
   };
 
@@ -1070,7 +1086,9 @@ export default function App() {
     if (screen !== "session" || !sRunning) return;
     const id = setTimeout(() => {
       if (sTimer > 1) {
-        if (sTimer >= 2 && sTimer <= 6) countdownTick(sTimer - 1);
+        const secondsLeft = sTimer - 1;
+        if (secondsLeft >= 1 && secondsLeft <= 5) countdownTick(secondsLeft);
+        else if (secondsLeft === warnThreshold1 || secondsLeft === warnThreshold2) shakeAlert();
         setSTimer(sTimer - 1);
         return;
       }
@@ -1082,7 +1100,9 @@ export default function App() {
         const nextRound = sRound + 1;
         if (nextRound > sRoundsPlan.length) {
           setSRunning(false); setSPhase("done"); setSBurstBig((n) => n + 1);
-          logHistory({ type: "table", name: sTable.name, difficulty: sDifficulty, completed: true, failedRound: null });
+          const hid = logHistory({ type: "table", name: sTable.name, difficulty: sDifficulty, completed: true, failedRound: null });
+          sHistoryIdRef.current = hid;
+          setSRecoverySeconds(recoveryMinutes * 60);
         } else {
           const next = sRoundsPlan[nextRound - 1];
           setSHoldTime(next.hold); setSBreatheTime(next.breathe); setSRound(nextRound); setSPhase("breathe"); setSTimer(next.breathe);
@@ -1090,7 +1110,27 @@ export default function App() {
       }
     }, 1000);
     return () => clearTimeout(id);
-  }, [screen, sRunning, sTimer, sPhase, sHoldTime, sBreatheTime, sRound, sTable, sDifficulty, sRoundsPlan, logHistory]);
+  }, [screen, sRunning, sTimer, sPhase, sHoldTime, sBreatheTime, sRound, sTable, sDifficulty, sRoundsPlan, logHistory, warnThreshold1, warnThreshold2, recoveryMinutes]);
+
+  useEffect(() => {
+    if (screen !== "session" || (sPhase !== "done" && sPhase !== "surfaced") || sRecoverySeconds <= 0) return;
+    const id = setTimeout(() => {
+      setSRecoverySeconds((t) => {
+        if (t <= 1) {
+          recoveryCompletePulse();
+          if (sHistoryIdRef.current) markRecovery(sHistoryIdRef.current, true);
+          return 0;
+        }
+        return t - 1;
+      });
+    }, 1000);
+    return () => clearTimeout(id);
+  }, [screen, sPhase, sRecoverySeconds, markRecovery]);
+
+  const skipRecovery = () => {
+    setSRecoverySeconds(0);
+    if (sHistoryIdRef.current) markRecovery(sHistoryIdRef.current, false);
+  };
 
   const sPhaseTotal = sPhase === "hold" ? sHoldTime : sBreatheTime;
   const sFraction = sPhaseTotal > 0 ? 1 - sTimer / sPhaseTotal : 0;
@@ -1103,8 +1143,10 @@ export default function App() {
     setShowSurfaceConfirm(false);
     setSRunning(false);
     setSBurst((n) => n + 1);
-    logHistory({ type: "table", name: sTable.name, difficulty: sDifficulty, completed: false, failedRound: sRound });
-    setScreen("train");
+    setSPhase("surfaced");
+    const hid = logHistory({ type: "table", name: sTable.name, difficulty: sDifficulty, completed: false, failedRound: sRound });
+    sHistoryIdRef.current = hid;
+    setSRecoverySeconds(recoveryMinutes * 60);
   };
 
   const contractionLongPress = useLongPress(() => setSContractions((c) => c + 1), 900);
@@ -1115,10 +1157,13 @@ export default function App() {
   const [paContractions, setPaContractions] = useState(0);
   const [paIsPR, setPaIsPR] = useState(false);
   const [paBurst, setPaBurst] = useState(0);
+  const [paRecoverySeconds, setPaRecoverySeconds] = useState(0);
+  const paHistoryIdRef = useRef(null);
   const lastMinuteRef = useRef(0);
 
   const startPrAttempt = () => {
     setPaMode("breathe"); setPaTimer(prBreatheSeconds); setPaElapsed(0); setPaContractions(0); setPaIsPR(false);
+    setPaRecoverySeconds(0); paHistoryIdRef.current = null;
     lastMinuteRef.current = 0; resetHr(); setScreen("prattempt");
   };
 
@@ -1126,7 +1171,13 @@ export default function App() {
     if (screen !== "prattempt") return;
     const id = setInterval(() => {
       if (paMode === "breathe") {
-        setPaTimer((t) => { if (t <= 1) { transitionPulse(); setPaMode("attempt"); return 0; } if (t >= 2 && t <= 6) countdownTick(t - 1); return t - 1; });
+        setPaTimer((t) => {
+          if (t <= 1) { transitionPulse(); setPaMode("attempt"); return 0; }
+          const secondsLeft = t - 1;
+          if (secondsLeft >= 1 && secondsLeft <= 5) countdownTick(secondsLeft);
+          else if (secondsLeft === warnThreshold1 || secondsLeft === warnThreshold2) shakeAlert();
+          return t - 1;
+        });
       } else if (paMode === "attempt") {
         setPaElapsed((t) => {
           const next = t + 1;
@@ -1137,16 +1188,37 @@ export default function App() {
       }
     }, 1000);
     return () => clearInterval(id);
-  }, [screen, paMode]);
+  }, [screen, paMode, warnThreshold1, warnThreshold2]);
 
   const paLongPress = useLongPress(() => setPaContractions((c) => c + 1), 900);
 
   const stopPrAttempt = () => {
     let beat = false;
     if (paElapsed > prSeconds) { setPrSeconds(paElapsed); setPaIsPR(true); beat = true; prBeatPulse(); setPaBurst((n) => n + 1); }
-    logHistory({ type: "pr", name: "PR Attempt", completed: true, isPR: beat, duration: paElapsed });
+    const hid = logHistory({ type: "pr", name: "PR Attempt", completed: true, isPR: beat, duration: paElapsed });
+    paHistoryIdRef.current = hid;
+    setPaRecoverySeconds(recoveryMinutes * 60);
     setPaMode("result");
   };
+  const skipPaRecovery = () => {
+    setPaRecoverySeconds(0);
+    if (paHistoryIdRef.current) markRecovery(paHistoryIdRef.current, false);
+  };
+
+  useEffect(() => {
+    if (screen !== "prattempt" || paMode !== "result" || paRecoverySeconds <= 0) return;
+    const id = setTimeout(() => {
+      setPaRecoverySeconds((t) => {
+        if (t <= 1) {
+          recoveryCompletePulse();
+          if (paHistoryIdRef.current) markRecovery(paHistoryIdRef.current, true);
+          return 0;
+        }
+        return t - 1;
+      });
+    }, 1000);
+    return () => clearTimeout(id);
+  }, [screen, paMode, paRecoverySeconds, markRecovery]);
 
   const goTab = (tab) => { setScreen(tab); setSelectedDate(null); };
 
@@ -1265,6 +1337,11 @@ export default function App() {
                             {e.isPR && <span style={{ color: COLORS.green, fontSize: 11, marginLeft: 6 }}>&#9733; PR</span>}
                           </div>
                           {!e.completed && <div style={{ color: COLORS.red, fontSize: 11.5, marginTop: 3 }}>FAILED &middot; surfaced on round {e.failedRound}</div>}
+                          {e.recoveryCompleted != null && (
+                            <div style={{ color: e.recoveryCompleted ? COLORS.greenBright : COLORS.dim, fontSize: 11, marginTop: 3 }}>
+                              {e.recoveryCompleted ? "\u2713 R\u00E9cup\u00E9ration termin\u00E9e" : "R\u00E9cup\u00E9ration pass\u00E9e"}
+                            </div>
+                          )}
                           {e.duration != null && <div style={{ color: COLORS.dim, fontSize: 11.5, marginTop: 3 }}>{formatTime(e.duration)}</div>}
                         </div>
                         <span onClick={() => setDeleteTarget({ kind: "history", id: e.id })} style={{ color: COLORS.red, cursor: "pointer", padding: 6 }}><Trash2 size={17} /></span>
@@ -1318,6 +1395,9 @@ export default function App() {
             <div style={{ padding: "0 20px" }}>
               <ToggleRow label="Haptics" sub="Vibration cues during sessions" checked={hapticsOn} onChange={setHapticsOn} />
               <Stepper label="PR breathe-up (s)" value={prBreatheSeconds} onDec={() => setPrBreatheSeconds((v) => Math.max(15, v - 10))} onInc={() => setPrBreatheSeconds((v) => v + 10)} />
+              <Stepper label="Alerte 1 (s restantes)" value={warnThreshold1} onDec={() => setWarnThreshold1((v) => Math.max(warnThreshold2 + 5, v - 5))} onInc={() => setWarnThreshold1((v) => v + 5)} />
+              <Stepper label="Alerte 2 (s restantes)" value={warnThreshold2} onDec={() => setWarnThreshold2((v) => Math.max(6, v - 5))} onInc={() => setWarnThreshold2((v) => Math.min(warnThreshold1 - 5, v + 5))} />
+              <Stepper label="Récupération (min)" value={recoveryMinutes} onDec={() => setRecoveryMinutes((v) => Math.max(0, v - 1))} onInc={() => setRecoveryMinutes((v) => v + 1)} />
 
               <div style={{ ...glass, background: COLORS.bgCard, borderRadius: 14, padding: "16px 18px", marginBottom: 12, border: "1px solid rgba(127,216,255,0.12)" }}>
                 <div style={{ color: COLORS.white, fontWeight: 600, fontSize: 15, marginBottom: 10 }}>Unité de profondeur</div>
@@ -1368,7 +1448,7 @@ export default function App() {
               <button onClick={() => setShowExitConfirm(true)} style={{ background: "none", border: "none", color: COLORS.dim, cursor: "pointer" }}><X size={24} /></button>
               <div style={{ textAlign: "center" }}>
                 <div style={{ color: COLORS.dim, fontSize: 12.5 }}>{sTable.name}</div>
-                <div style={{ color: COLORS.cyan, fontWeight: 700, fontFamily: DISPLAY_FONT, letterSpacing: 2, fontSize: 15 }}>{sPhase === "done" ? "COMPLETE" : `ROUND ${sRound}/${sRoundsPlan.length}`}</div>
+                <div style={{ color: COLORS.cyan, fontWeight: 700, fontFamily: DISPLAY_FONT, letterSpacing: 2, fontSize: 15 }}>{sPhase === "done" ? "COMPLETE" : sPhase === "surfaced" ? "SURFACED" : `ROUND ${sRound}/${sRoundsPlan.length}`}</div>
               </div>
               <div style={{ width: 24 }} />
             </div>
@@ -1392,7 +1472,7 @@ export default function App() {
                 <ProgressRing fraction={sRunning || sPhase === "hold" || sPhase === "breathe" ? sFraction : 0} color={sPhase === "breathe" || sPhase === "ready" ? COLORS.green : COLORS.cyan} />
                 <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
                   <div style={{ fontSize: 14, letterSpacing: 3, color: sPhase === "breathe" || sPhase === "ready" ? COLORS.greenBright : COLORS.cyanBright, fontWeight: 700, fontFamily: DISPLAY_FONT }}>
-                    {sPhase === "ready" ? "READY" : sPhase === "breathe" ? "BREATHE" : sPhase === "hold" ? "HOLD" : "DONE"}
+                    {sPhase === "ready" ? "READY" : sPhase === "breathe" ? "BREATHE" : sPhase === "hold" ? "HOLD" : sPhase === "surfaced" ? "SURFACED" : "DONE"}
                   </div>
                   <div style={{ fontSize: 50, fontWeight: 700, color: COLORS.white, fontFamily: DISPLAY_FONT, fontVariantNumeric: "tabular-nums" }}>{formatTime(sTimer)}</div>
                 </div>
@@ -1404,8 +1484,21 @@ export default function App() {
               {(sPhase === "breathe" || sPhase === "ready") && sRunning && (
                 <div style={{ color: COLORS.dim, fontSize: 12, marginTop: 16, letterSpacing: 1, textAlign: "center" }}>DOUBLE-TAP TO SKIP</div>
               )}
-              {sPhase === "done" && (
-                <button onClick={(e) => { e.stopPropagation(); beginSession(sTable, sDifficulty); }} style={{ ...primaryBtnStyle, marginTop: 30, maxWidth: 280 }}>Restart</button>
+              {(sPhase === "done" || sPhase === "surfaced") && (
+                <div style={{ marginTop: 26, width: "100%", maxWidth: 280, textAlign: "center" }}>
+                  {sRecoverySeconds > 0 ? (
+                    <div style={{ ...glass, background: COLORS.bgCard, borderRadius: 16, padding: "14px 18px", marginBottom: 14, border: "1px solid rgba(127,232,168,0.25)" }}>
+                      <div style={{ color: COLORS.greenBright, fontSize: 12, letterSpacing: 1.5, fontFamily: DISPLAY_FONT, marginBottom: 4 }}>RÉCUPÉRATION</div>
+                      <div style={{ color: COLORS.white, fontSize: 24, fontWeight: 700, fontFamily: DISPLAY_FONT, fontVariantNumeric: "tabular-nums" }}>{formatTime(sRecoverySeconds)}</div>
+                      <button onClick={(e) => { e.stopPropagation(); skipRecovery(); }} style={{ background: "none", border: "none", color: COLORS.dim, fontSize: 12, marginTop: 6, cursor: "pointer" }}>Passer</button>
+                    </div>
+                  ) : null}
+                  {sPhase === "done" ? (
+                    <button onClick={(e) => { e.stopPropagation(); beginSession(sTable, sDifficulty); }} style={primaryBtnStyle}>Restart</button>
+                  ) : (
+                    <button onClick={(e) => { e.stopPropagation(); setScreen("train"); }} style={primaryBtnStyle}>Retour</button>
+                  )}
+                </div>
               )}
               {sPhase === "hold" && (
                 <div style={{ textAlign: "center", marginTop: 20 }}>
@@ -1475,7 +1568,18 @@ export default function App() {
                   <div style={{ color: COLORS.dim, fontSize: 11, marginTop: 4, letterSpacing: 1 }}>ANYWHERE ON SCREEN</div>
                 </div>
               )}
-              {paMode === "result" && <button onClick={(e) => { e.stopPropagation(); setScreen("pr"); }} style={{ ...primaryBtnStyle, marginTop: 30, maxWidth: 280 }}>Back</button>}
+              {paMode === "result" && (
+                <div style={{ marginTop: 30, width: "100%", maxWidth: 280, textAlign: "center" }}>
+                  {paRecoverySeconds > 0 && (
+                    <div style={{ ...glass, background: COLORS.bgCard, borderRadius: 16, padding: "14px 18px", marginBottom: 14, border: "1px solid rgba(127,232,168,0.25)" }}>
+                      <div style={{ color: COLORS.greenBright, fontSize: 12, letterSpacing: 1.5, fontFamily: DISPLAY_FONT, marginBottom: 4 }}>RÉCUPÉRATION</div>
+                      <div style={{ color: COLORS.white, fontSize: 24, fontWeight: 700, fontFamily: DISPLAY_FONT, fontVariantNumeric: "tabular-nums" }}>{formatTime(paRecoverySeconds)}</div>
+                      <button onClick={(e) => { e.stopPropagation(); skipPaRecovery(); }} style={{ background: "none", border: "none", color: COLORS.dim, fontSize: 12, marginTop: 6, cursor: "pointer" }}>Passer</button>
+                    </div>
+                  )}
+                  <button onClick={(e) => { e.stopPropagation(); setScreen("pr"); }} style={primaryBtnStyle}>Back</button>
+                </div>
+              )}
             </div>
             <div style={{ padding: "0 20px 22px" }}>
               {paMode === "attempt" && (
