@@ -33,6 +33,24 @@ export async function countdownTick(secondsLeft) {
   await pulse(Math.max(25, duration));
 }
 
+// A "shake" alert - a rapid burst of short pulses, clearly distinct from the
+// single countdown tick and the 3-pulse transition. Used for the 20s/10s
+// heads-up warnings, well before the final 5-second countdown starts.
+export async function shakeAlert() {
+  for (let i = 0; i < 5; i++) {
+    await pulse(40);
+    await new Promise((r) => setTimeout(r, 55));
+  }
+}
+
+// Two soft, gentle pulses marking the end of the recovery breathing period -
+// deliberately calmer than the other alerts since recovery is a wind-down moment.
+export async function recoveryCompletePulse() {
+  await pulse(55);
+  await new Promise((r) => setTimeout(r, 220));
+  await pulse(55);
+}
+
 export async function warningPulse() {
   await pulse(45);
   await new Promise((r) => setTimeout(r, 160));
