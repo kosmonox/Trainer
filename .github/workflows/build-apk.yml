@@ -61,11 +61,40 @@ jobs:
           cp native/MediaHapticsPlugin.java "$PKG_DIR/"
           cp native/MainActivity.java "$PKG_DIR/"
 
+      - name: Set up signing keystore
+        run: |
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > android/app/apnea-release.keystore
+          cat >> android/app/build.gradle << 'GRADLEEOF'
+
+android {
+    signingConfigs {
+        release {
+            storeFile file('apnea-release.keystore')
+            storePassword System.getenv('KEYSTORE_PASSWORD')
+            keyAlias System.getenv('KEY_ALIAS')
+            keyPassword System.getenv('KEY_PASSWORD')
+        }
+    }
+    buildTypes {
+        debug {
+            signingConfig signingConfigs.release
+        }
+        release {
+            signingConfig signingConfigs.release
+        }
+    }
+}
+GRADLEEOF
+
       - name: Make gradlew executable
         run: chmod +x android/gradlew
 
       - name: Build debug APK
         working-directory: android
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: ./gradlew assembleDebug --stacktrace
 
       - name: Upload APK
