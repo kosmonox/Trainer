@@ -115,15 +115,28 @@ function getEventXY(e) {
   return { x: window.innerWidth / 2, y: window.innerHeight / 2 };
 }
 
-function autoTable(type, prSeconds) {
+// Difficulty targets, as a percentage of PR the O2 table's LAST round should
+// reach - not a raw multiplier on hold time. This is what actually keeps the
+// table safe: earlier design multiplied an already-escalating hold, which
+// could push the final round past 100% of PR. Targeting a percentage directly
+// guarantees the final round never exceeds it, at any difficulty.
+const O2_TARGET_PCT = { easy: 0.70, normal: 0.80, hard: 0.88 };
+
+function autoTable(type, prSeconds, difficulty) {
   if (type === "O2") {
+    const rounds = 8;
     const hold = prSeconds > 0 ? Math.max(15, Math.round(prSeconds * 0.5)) : 60;
-    const step = prSeconds > 0 ? Math.max(5, Math.round(prSeconds * 0.08)) : 15;
-    return { id: "auto-o2", name: "O2 Table", tableType: "O2", baseHold: hold, baseBreathe: 120, step, rounds: 8 };
+    const targetPct = O2_TARGET_PCT[difficulty] || O2_TARGET_PCT.normal;
+    const targetHold = prSeconds > 0 ? Math.round(prSeconds * targetPct) : hold + (rounds - 1) * 15;
+    const step = Math.max(0, Math.round((targetHold - hold) / (rounds - 1)));
+    return { id: "auto-o2", name: "O2 Table", tableType: "O2", isAuto: true, autoKind: "O2", baseHold: hold, baseBreathe: 120, step, rounds };
   }
+  // CO2: hold stays constant (never escalates toward PR), only breathe shrinks -
+  // this was never able to exceed PR even at Hard (max ~65% of PR), so the
+  // original coefficient approach is left as-is here.
   const hold = prSeconds > 0 ? Math.max(15, Math.round(prSeconds * 0.5)) : 90;
   const step = prSeconds > 0 ? Math.max(5, Math.round(prSeconds * 0.06)) : 15;
-  return { id: "auto-co2", name: "CO2 Table", tableType: "CO2", baseHold: hold, baseBreathe: 150, step, rounds: 8 };
+  return { id: "auto-co2", name: "CO2 Table", tableType: "CO2", isAuto: true, autoKind: "CO2", baseHold: hold, baseBreathe: 150, step, rounds: 8 };
 }
 
 // Works for both algorithmic ("simple") tables and explicit-per-round ("advanced") tables.
@@ -1053,7 +1066,7 @@ export default function App() {
   };
 
   const [pendingTable, setPendingTable] = useState(null);
-  const tpList = () => [autoTable("O2", prSeconds), autoTable("CO2", prSeconds), ...customTables];
+  const tpList = () => [autoTable("O2", prSeconds, "normal"), autoTable("CO2", prSeconds, "normal"), ...customTables];
 
   const [sTable, setSTable] = useState(null);
   const [sDifficulty, setSDifficulty] = useState("normal");
@@ -1075,14 +1088,23 @@ export default function App() {
 
   const beginSession = (table, difficulty) => {
     const d = DIFFICULTIES[difficulty];
-    const plan = computeRoundPreview(table).map((r) => ({ hold: Math.round(r.hold * d.holdMul), breathe: Math.round(r.breathe * d.breatheMul) }));
+    // O2 auto tables: regenerate with the step derived for this difficulty's
+    // target %-of-PR, then only scale breathe (recovery) - hold is already
+    // correctly bounded by construction, multiplying it again would reintroduce
+    // the "exceeds PR" bug this fix removes.
+    const isO2Auto = table.autoKind === "O2";
+    const effectiveTable = isO2Auto ? autoTable("O2", prSeconds, difficulty) : table;
+    const plan = computeRoundPreview(effectiveTable).map((r) => ({
+      hold: isO2Auto ? r.hold : Math.round(r.hold * d.holdMul),
+      breathe: Math.round(r.breathe * d.breatheMul),
+    }));
     // The very first breathe-up is preparation, not part of the training load -
     // difficulty must never shorten it. Keep the table's own unscaled value,
     // capped at the configured PR breathe-up so it can be shortened by choice
     // but never lengthened unexpectedly.
-    const firstBreathe = Math.min(computeRoundPreview(table)[0].breathe, prBreatheSeconds);
+    const firstBreathe = Math.min(computeRoundPreview(effectiveTable)[0].breathe, prBreatheSeconds);
     plan[0] = { ...plan[0], breathe: firstBreathe };
-    setSTable(table); setSDifficulty(difficulty); setSRoundsPlan(plan); setSRound(1);
+    setSTable(effectiveTable); setSDifficulty(difficulty); setSRoundsPlan(plan); setSRound(1);
     setSHoldTime(plan[0].hold); setSBreatheTime(plan[0].breathe);
     setSPhase("ready"); setSTimer(plan[0].breathe); setSRunning(false); setSContractions(0);
     setSRecoverySeconds(0); sHistoryIdRef.current = null;
