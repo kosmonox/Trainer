@@ -9,6 +9,7 @@ import { loadStored, saveStored } from "./storage.js";
 import { scanAndConnectHrMonitor, disconnectHrMonitor } from "./ble.js";
 import { transitionPulse, minutePulse, prBeatPulse, countdownTick, shakeAlert, recoveryCompletePulse, setHapticsEnabled, testVibrate } from "./haptics.js";
 import { Share } from "@capacitor/share";
+import { KeepAwake } from "@capacitor-community/keep-awake";
 
 const COLORS = {
   bg: "#030f18",
@@ -1075,6 +1076,12 @@ export default function App() {
   const beginSession = (table, difficulty) => {
     const d = DIFFICULTIES[difficulty];
     const plan = computeRoundPreview(table).map((r) => ({ hold: Math.round(r.hold * d.holdMul), breathe: Math.round(r.breathe * d.breatheMul) }));
+    // The very first breathe-up is preparation, not part of the training load -
+    // difficulty must never shorten it. Keep the table's own unscaled value,
+    // capped at the configured PR breathe-up so it can be shortened by choice
+    // but never lengthened unexpectedly.
+    const firstBreathe = Math.min(computeRoundPreview(table)[0].breathe, prBreatheSeconds);
+    plan[0] = { ...plan[0], breathe: firstBreathe };
     setSTable(table); setSDifficulty(difficulty); setSRoundsPlan(plan); setSRound(1);
     setSHoldTime(plan[0].hold); setSBreatheTime(plan[0].breathe);
     setSPhase("ready"); setSTimer(plan[0].breathe); setSRunning(false); setSContractions(0);
@@ -1219,6 +1226,20 @@ export default function App() {
     }, 1000);
     return () => clearTimeout(id);
   }, [screen, paMode, paRecoverySeconds, markRecovery]);
+
+  // Keep the screen on during live sessions only - a table can run 20+ minutes
+  // with no touch input, so the screen sleeping mid-hold is a real problem.
+  // Released outside sessions so it doesn't drain battery while browsing.
+  useEffect(() => {
+    const isLive = screen === "session" || screen === "prattempt";
+    (async () => {
+      try {
+        if (isLive) await KeepAwake.keepAwake();
+        else await KeepAwake.allowSleep();
+      } catch (e) {}
+    })();
+    return () => { KeepAwake.allowSleep().catch(() => {}); };
+  }, [screen]);
 
   const goTab = (tab) => { setScreen(tab); setSelectedDate(null); };
 
