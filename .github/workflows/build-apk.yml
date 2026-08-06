@@ -95,7 +95,21 @@ GRADLEEOF
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-        run: ./gradlew assembleDebug --stacktrace
+        run: |
+          set +e
+          ./gradlew assembleDebug --stacktrace > ../gradle-build.log 2>&1
+          echo "EXIT_CODE=$?" >> ../gradle-build.log
+          tail -80 ../gradle-build.log
+
+      - name: Commit build log for diagnosis
+        if: always()
+        run: |
+          git config user.email "action@github.com"
+          git config user.name "GitHub Action"
+          tail -120 gradle-build.log > build-error.log || true
+          git add -f build-error.log
+          git commit -m "Build diagnostics [skip ci]" || echo "nothing to commit"
+          git push || echo "push failed"
 
       - name: Upload APK
         if: success()
