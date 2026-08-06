@@ -61,55 +61,19 @@ jobs:
           cp native/MediaHapticsPlugin.java "$PKG_DIR/"
           cp native/MainActivity.java "$PKG_DIR/"
 
-      - name: Set up signing keystore
+      - name: Install persistent debug keystore
         run: |
-          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > android/app/apnea-release.keystore
-          cat >> android/app/build.gradle << 'GRADLEEOF'
-
-android {
-    signingConfigs {
-        release {
-            storeFile file('apnea-release.keystore')
-            storePassword System.getenv('KEYSTORE_PASSWORD')
-            keyAlias System.getenv('KEY_ALIAS')
-            keyPassword System.getenv('KEY_PASSWORD')
-        }
-    }
-    buildTypes {
-        debug {
-            signingConfig signingConfigs.release
-        }
-        release {
-            signingConfig signingConfigs.release
-        }
-    }
-}
-GRADLEEOF
+          mkdir -p ~/.android
+          echo "${{ secrets.DEBUG_KEYSTORE_BASE64 }}" | base64 -d > ~/.android/debug.keystore
+          echo "Keystore installed:"
+          keytool -list -keystore ~/.android/debug.keystore -storepass android | head -5
 
       - name: Make gradlew executable
         run: chmod +x android/gradlew
 
       - name: Build debug APK
         working-directory: android
-        env:
-          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-        run: |
-          set +e
-          ./gradlew assembleDebug --stacktrace > ../gradle-build.log 2>&1
-          echo "EXIT_CODE=$?" >> ../gradle-build.log
-          tail -80 ../gradle-build.log
-
-      - name: Commit build log for diagnosis
-        if: always()
-        run: |
-          git config user.email "action@github.com"
-          git config user.name "GitHub Action"
-          tail -120 gradle-build.log > build-error.log || true
-          git add -f build-error.log
-          git commit -m "Build diagnostics [skip ci]" || echo "nothing to commit"
-          git push || echo "push failed"
+        run: ./gradlew assembleDebug --stacktrace
 
       - name: Upload APK
         if: success()
